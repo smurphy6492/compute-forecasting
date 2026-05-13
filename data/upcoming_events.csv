@@ -1,0 +1,6 @@
+event_name,expected_date,compute_type,customer_segment,estimated_daily_hours,probability,notes
+TechGiant Corp GPU Training Contract,2026-08-01,GPU Training,Enterprise,2500,0.7,In final contract negotiations. CTO has signed off internally.
+FinanceAI Inference Platform Migration,2026-09-15,GPU Inference,Enterprise,1800,0.55,Migrating from on-prem. Security review in progress.
+AI Startup Cohort (YC S2026 Batch),2026-08-15,GPU Training,Startup,800,0.85,Partnership with YC to provide compute credits. High confidence.
+Federal Research Computing Grant Wave,2026-10-01,GPU Training,Research/Academic,1200,0.4,Grant applications submitted. Awards announced Sept 2026.
+MedTech Mid-Market Inference Expansion,2026-11-01,GPU Inference,Mid-Market,600,0.6,Existing customer expanding from pilot to production inference.
