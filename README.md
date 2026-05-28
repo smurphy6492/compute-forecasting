@@ -2,13 +2,9 @@
 
 ML-driven capacity planning for a fast-growing AI compute infrastructure company. Forecasts daily compute hours using gradient boosting (LightGBM) with quantile regression for confidence intervals, plus scenario planning for board-level capacity decisions.
 
-## Status
-
-Work in progress — Session 1 (data generation) complete.
-
 ## Business Context
 
-You're the analytics lead at a cloud GPU/CPU compute provider growing rapidly. Leadership needs to answer: **"When do we need to buy more GPUs?"**
+Fast-growing AI compute infrastructure company facing 3-6 month GPU procurement lead times. Leadership needs to answer: **"When do we need to buy more GPUs?"**
 
 This project builds a forecasting system that produces:
 
@@ -44,7 +40,6 @@ The data is synthetic but designed to feel real — every anomaly has a document
 ```
 compute-forecasting/
 ├── README.md
-├── SESSION_GUIDE.md                    # Session-by-session build guide
 ├── pyproject.toml
 ├── data/
 │   ├── generate_synthetic_data.py      # Deterministic, seeded data generator
