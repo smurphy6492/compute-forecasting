@@ -35,25 +35,25 @@ CUSTOMER_SEGMENTS = ["Enterprise", "Mid-Market", "Startup", "Research/Academic"]
 # These represent starting levels on day 0. Units = compute-hours per day.
 BASE_HOURS: dict[tuple[str, str], float] = {
     # GPU Training — large training jobs, Enterprise dominates
-    ("GPU Training", "Enterprise"): 12_000,
-    ("GPU Training", "Mid-Market"): 4_500,
-    ("GPU Training", "Startup"): 1_800,
-    ("GPU Training", "Research/Academic"): 3_200,
+    ("GPU Training", "Enterprise"): 11_847,
+    ("GPU Training", "Mid-Market"): 4_623,
+    ("GPU Training", "Startup"): 1_891,
+    ("GPU Training", "Research/Academic"): 3_174,
     # GPU Inference — serving models, fast-growing across all segments
-    ("GPU Inference", "Enterprise"): 8_000,
-    ("GPU Inference", "Mid-Market"): 3_500,
-    ("GPU Inference", "Startup"): 2_200,
-    ("GPU Inference", "Research/Academic"): 1_200,
+    ("GPU Inference", "Enterprise"): 7_832,
+    ("GPU Inference", "Mid-Market"): 3_417,
+    ("GPU Inference", "Startup"): 2_156,
+    ("GPU Inference", "Research/Academic"): 1_243,
     # CPU Batch — ETL, data processing, mature workload
-    ("CPU Batch", "Enterprise"): 6_000,
-    ("CPU Batch", "Mid-Market"): 3_000,
-    ("CPU Batch", "Startup"): 800,
-    ("CPU Batch", "Research/Academic"): 1_500,
+    ("CPU Batch", "Enterprise"): 5_918,
+    ("CPU Batch", "Mid-Market"): 2_973,
+    ("CPU Batch", "Startup"): 814,
+    ("CPU Batch", "Research/Academic"): 1_537,
     # CPU Interactive — notebooks, dev environments, tied to developer activity
-    ("CPU Interactive", "Enterprise"): 4_000,
-    ("CPU Interactive", "Mid-Market"): 2_000,
-    ("CPU Interactive", "Startup"): 1_200,
-    ("CPU Interactive", "Research/Academic"): 2_500,
+    ("CPU Interactive", "Enterprise"): 3_946,
+    ("CPU Interactive", "Mid-Market"): 2_087,
+    ("CPU Interactive", "Startup"): 1_178,
+    ("CPU Interactive", "Research/Academic"): 2_461,
 }
 
 # Monthly compound growth rates by compute_type
@@ -72,6 +72,10 @@ SEGMENT_GROWTH_MULTIPLIERS: dict[str, float] = {
     "Research/Academic": 0.30,  # Budget-constrained, near-flat
 }
 
+# Monthly growth variation — growth rates aren't perfectly constant
+# Standard deviation of monthly growth noise (multiplicative on effective rate)
+GROWTH_NOISE_STD = 0.35  # ±35% variation around base growth rate each month
+
 # ---------------------------------------------------------------------------
 # Weekly seasonality — day-of-week multipliers (Mon=0 ... Sun=6)
 # ---------------------------------------------------------------------------
@@ -84,6 +88,15 @@ WEEKLY_PATTERNS: dict[str, list[float]] = {
     "CPU Batch": [1.02, 1.05, 1.08, 1.08, 1.05, 0.70, 0.60],
     # CPU Interactive: steepest weekend drop — developers go home
     "CPU Interactive": [1.00, 1.08, 1.12, 1.15, 1.05, 0.58, 0.50],
+}
+
+# Segment-specific weekend modifiers — Startups work more weekends, Enterprise less
+# Applied multiplicatively to the weekend days (Sat=5, Sun=6) only
+SEGMENT_WEEKEND_MODIFIER: dict[str, float] = {
+    "Enterprise": 0.90,         # Enterprise weekends are even quieter
+    "Mid-Market": 1.00,         # Baseline
+    "Startup": 1.15,            # Startups work more weekends
+    "Research/Academic": 1.05,  # Grad students work some weekends
 }
 
 # ---------------------------------------------------------------------------
@@ -191,23 +204,33 @@ def _build_holiday_set() -> dict[date, str]:
     return holidays
 
 
-HOLIDAY_IMPACT: dict[str, float] = {
-    # How much holidays reduce activity by segment
-    "Enterprise": 0.45,        # Big drop — corporate closures
-    "Mid-Market": 0.40,
-    "Startup": 0.25,           # Smaller teams, often still working
-    "Research/Academic": 0.50,  # Universities close
+# Holiday impact varies by holiday severity AND segment
+# Tier 1 (major): Christmas, Thanksgiving, Independence Day, New Year's
+# Tier 2 (moderate): Memorial Day, Labor Day, Day After Thanksgiving
+# Tier 3 (minor): MLK Day, Presidents' Day, Columbus Day, Veterans Day
+MAJOR_HOLIDAYS = {"Christmas Day", "Thanksgiving", "Independence Day", "New Year's Day"}
+MODERATE_HOLIDAYS = {"Memorial Day", "Labor Day", "Day After Thanksgiving"}
+# Everything else is minor
+
+HOLIDAY_IMPACT: dict[str, dict[str, float]] = {
+    # (segment -> {tier -> reduction})
+    "Enterprise": {"major": 0.55, "moderate": 0.35, "minor": 0.15},
+    "Mid-Market": {"major": 0.50, "moderate": 0.30, "minor": 0.12},
+    "Startup": {"major": 0.30, "moderate": 0.15, "minor": 0.05},
+    "Research/Academic": {"major": 0.60, "moderate": 0.40, "minor": 0.20},
 }
 
 # ---------------------------------------------------------------------------
 # Step-changes — permanent level shifts from new customers
 # ---------------------------------------------------------------------------
+# Step-changes ramp up over ramp_days instead of instant jumps
 STEP_CHANGES = [
     {
         "date": date(2024, 2, 15),
         "name": "MegaCorp Enterprise Onboarding",
         "description": "Large enterprise customer 'MegaCorp' signs multi-year contract. "
                        "Onboards GPU Training and GPU Inference workloads.",
+        "ramp_days": 14,  # 2-week onboarding ramp
         "affected": [
             ("GPU Training", "Enterprise", 0.15),   # +15% permanent
             ("GPU Inference", "Enterprise", 0.15),
@@ -218,8 +241,20 @@ STEP_CHANGES = [
         "name": "ScaleAI-Partner Mid-Market Signing",
         "description": "Mid-market AI company 'ScaleAI-Partner' begins heavy inference "
                        "workloads after pilot program converts.",
+        "ramp_days": 10,
         "affected": [
             ("GPU Inference", "Mid-Market", 0.08),   # +8% permanent
+        ],
+    },
+    {
+        "date": date(2025, 6, 15),
+        "name": "DataFlow Startup Churn",
+        "description": "Startup customer 'DataFlow' migrates to competitor platform "
+                       "after Series A pivot. Gradual wind-down.",
+        "ramp_days": 21,  # 3-week wind-down
+        "affected": [
+            ("GPU Training", "Startup", -0.10),   # -10% permanent (churn)
+            ("GPU Inference", "Startup", -0.06),   # -6%
         ],
     },
     {
@@ -227,6 +262,7 @@ STEP_CHANGES = [
         "name": "University Research Grant Cycle",
         "description": "New federal research grants bring 3 universities onto the platform "
                        "for large-scale training experiments.",
+        "ramp_days": 14,
         "affected": [
             ("GPU Training", "Research/Academic", 0.12),  # +12% permanent
         ],
@@ -351,18 +387,53 @@ def _months_since_start(d: date) -> float:
     return delta.days / 30.44  # average days per month
 
 
+def _build_growth_schedule() -> dict[tuple[str, str, int], float]:
+    """Pre-compute per-series monthly growth rates with random variation."""
+    schedule = {}
+    for ct in COMPUTE_TYPES:
+        for seg in CUSTOMER_SEGMENTS:
+            base_rate = GROWTH_RATES_BY_TYPE[ct] * SEGMENT_GROWTH_MULTIPLIERS[seg]
+            for month_idx in range(48):  # enough months to cover the range
+                # Add random variation to monthly growth rate
+                noise = RNG.normal(0, GROWTH_NOISE_STD * base_rate)
+                monthly_rate = max(base_rate + noise, -0.02)  # floor at -2% to avoid collapse
+                schedule[(ct, seg, month_idx)] = monthly_rate
+    return schedule
+
+
+GROWTH_SCHEDULE = _build_growth_schedule()
+
+
 def _compute_trend(d: date, compute_type: str, segment: str) -> float:
-    """Compound growth factor for a given date, type, and segment."""
+    """Compound growth factor using pre-computed variable monthly rates."""
     months = _months_since_start(d)
-    base_rate = GROWTH_RATES_BY_TYPE[compute_type]
-    segment_mult = SEGMENT_GROWTH_MULTIPLIERS[segment]
-    effective_rate = base_rate * segment_mult
-    return (1 + effective_rate) ** months
+    full_months = int(months)
+    frac = months - full_months
+
+    # Compound the variable monthly rates
+    factor = 1.0
+    for m in range(full_months):
+        rate = GROWTH_SCHEDULE[(compute_type, segment, m)]
+        factor *= (1 + rate)
+
+    # Partial month
+    if frac > 0 and full_months < 48:
+        rate = GROWTH_SCHEDULE[(compute_type, segment, full_months)]
+        factor *= (1 + rate * frac)
+
+    return factor
 
 
-def _weekly_factor(d: date, compute_type: str) -> float:
-    """Day-of-week multiplier."""
-    return WEEKLY_PATTERNS[compute_type][d.weekday()]
+def _weekly_factor(d: date, compute_type: str, segment: str) -> float:
+    """Day-of-week multiplier with segment-specific weekend adjustment."""
+    dow = d.weekday()
+    factor = WEEKLY_PATTERNS[compute_type][dow]
+    # Apply segment weekend modifier on Sat/Sun only
+    if dow >= 5:
+        modifier = SEGMENT_WEEKEND_MODIFIER[segment]
+        # Blend toward modifier: weekend factor adjusted proportionally
+        factor *= modifier
+    return factor
 
 
 def _annual_factor(d: date) -> float:
@@ -381,31 +452,69 @@ def _annual_factor(d: date) -> float:
 
 
 def _holiday_factor(d: date, segment: str, holidays: dict[date, str]) -> float:
-    """Holiday reduction factor. Returns 1.0 if not a holiday."""
-    if d in holidays:
-        return 1.0 - HOLIDAY_IMPACT[segment]
-    return 1.0
+    """Holiday reduction factor with severity tiers. Returns 1.0 if not a holiday."""
+    if d not in holidays:
+        return 1.0
+    name = holidays[d]
+    if name in MAJOR_HOLIDAYS:
+        tier = "major"
+    elif name in MODERATE_HOLIDAYS:
+        tier = "moderate"
+    else:
+        tier = "minor"
+    return 1.0 - HOLIDAY_IMPACT[segment][tier]
 
 
 def _step_change_factor(d: date, compute_type: str, segment: str) -> float:
-    """Cumulative step-change multiplier from customer onboarding events."""
+    """Cumulative step-change multiplier with gradual ramp-up/down."""
     factor = 1.0
     for event in STEP_CHANGES:
-        if d >= event["date"]:
-            for ct, seg, magnitude in event["affected"]:
-                if ct == compute_type and seg == segment:
-                    factor *= (1.0 + magnitude)
+        event_date = event["date"]
+        ramp_days = event.get("ramp_days", 1)
+        ramp_end = event_date + timedelta(days=ramp_days)
+        for ct, seg, magnitude in event["affected"]:
+            if ct != compute_type or seg != segment:
+                continue
+            if d >= ramp_end:
+                # Fully ramped
+                factor *= (1.0 + magnitude)
+            elif d >= event_date:
+                # During ramp: linear interpolation
+                progress = (d - event_date).days / ramp_days
+                factor *= (1.0 + magnitude * progress)
     return factor
 
 
 def _spike_factor(d: date, compute_type: str, segment: str) -> float:
-    """One-time spike multiplier. Returns 1.0 outside spike windows."""
+    """One-time spike multiplier with buildup and decay shape."""
     factor = 1.0
     for event in SPIKE_EVENTS:
-        if event["start_date"] <= d <= event["end_date"]:
+        start = event["start_date"]
+        end = event["end_date"]
+        duration = (end - start).days + 1
+        # Extend window: 1 day buildup before, 1 day decay after
+        if start - timedelta(days=1) <= d <= end + timedelta(days=1):
             for ct, seg, mult in event["affected"]:
-                if ct == compute_type and seg == segment:
-                    factor *= mult
+                if ct != compute_type or seg != segment:
+                    continue
+                excess = mult - 1.0  # e.g., 1.8 -> 0.8 excess
+                if d < start:
+                    # Buildup day: 40% of peak
+                    factor *= 1.0 + excess * 0.4
+                elif d > end:
+                    # Decay day: 30% of peak
+                    factor *= 1.0 + excess * 0.3
+                elif duration >= 3:
+                    # Multi-day: ramp up, peak, ramp down
+                    day_idx = (d - start).days
+                    if day_idx == 0:
+                        factor *= 1.0 + excess * 0.7
+                    elif day_idx == duration - 1:
+                        factor *= 1.0 + excess * 0.8
+                    else:
+                        factor *= mult  # full peak on middle days
+                else:
+                    factor *= mult  # short spikes: full peak
     return factor
 
 
@@ -436,15 +545,16 @@ def generate_compute_usage() -> pd.DataFrame:
             for seg in CUSTOMER_SEGMENTS:
                 base = BASE_HOURS[(ct, seg)]
                 trend = _compute_trend(d, ct, seg)
-                weekly = _weekly_factor(d, ct)
+                weekly = _weekly_factor(d, ct, seg)
                 annual = _annual_factor(d)
                 holiday = _holiday_factor(d, seg, holidays)
                 step = _step_change_factor(d, ct, seg)
                 spike = _spike_factor(d, ct, seg)
                 outage = _outage_factor(d, ct)
 
-                # Multiplicative noise (log-normal so it's always positive)
-                noise = RNG.lognormal(mean=0.0, sigma=NOISE_STD[seg])
+                # Symmetric multiplicative noise: exp(N(0, sigma))
+                # Median = 1.0, no upward bias unlike raw lognormal
+                noise = np.exp(RNG.normal(0.0, NOISE_STD[seg]))
 
                 value = base * trend * weekly * annual * holiday * step * spike * outage * noise
                 value = max(0, round(value))
@@ -476,15 +586,18 @@ def generate_event_log() -> pd.DataFrame:
     """Generate the historical event log documenting all known events."""
     rows = []
 
-    # Step-changes
+    # Step-changes (including churn)
     for event in STEP_CHANGES:
         affected_types = sorted({ct for ct, _, _ in event["affected"]})
         affected_segs = sorted({seg for _, seg, _ in event["affected"]})
         magnitudes = [f"{mag:+.0%}" for _, _, mag in event["affected"]]
+        ramp_days = event.get("ramp_days", 1)
+        ramp_end = event["date"] + timedelta(days=ramp_days)
+        event_type = "churn" if any(m < 0 for _, _, m in event["affected"]) else "step_change"
         rows.append({
             "event_date": event["date"],
-            "event_end_date": event["date"],
-            "event_type": "step_change",
+            "event_end_date": ramp_end,
+            "event_type": event_type,
             "event_name": event["name"],
             "description": event["description"],
             "affected_compute_types": "; ".join(affected_types),

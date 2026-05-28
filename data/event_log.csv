@@ -1,7 +1,8 @@
 event_date,event_end_date,event_type,event_name,description,affected_compute_types,affected_segments,magnitude
-2024-02-15,2024-02-15,step_change,MegaCorp Enterprise Onboarding,Large enterprise customer 'MegaCorp' signs multi-year contract. Onboards GPU Training and GPU Inference workloads.,GPU Inference; GPU Training,Enterprise,+15%; +15%
+2024-02-15,2024-02-29,step_change,MegaCorp Enterprise Onboarding,Large enterprise customer 'MegaCorp' signs multi-year contract. Onboards GPU Training and GPU Inference workloads.,GPU Inference; GPU Training,Enterprise,+15%; +15%
 2024-08-12,2024-08-14,spike,ML Conference 2024 (NeurIPS Prep),Major ML conference drives burst of training activity from Startups and Research labs submitting last-minute experiments.,GPU Training,Research/Academic; Startup,1.8x; 2.0x
-2024-12-01,2024-12-01,step_change,ScaleAI-Partner Mid-Market Signing,Mid-market AI company 'ScaleAI-Partner' begins heavy inference workloads after pilot program converts.,GPU Inference,Mid-Market,+8%
+2024-12-01,2024-12-11,step_change,ScaleAI-Partner Mid-Market Signing,Mid-market AI company 'ScaleAI-Partner' begins heavy inference workloads after pilot program converts.,GPU Inference,Mid-Market,+8%
 2025-04-07,2025-04-11,outage,GPU Cluster Outage,Hardware failure in primary GPU cluster causes 2-day outage for GPU workloads. 3-day recovery period at reduced capacity. CPU workloads on separate infrastructure are unaffected.,GPU Inference; GPU Training,All,10% during outage; 60% during recovery
+2025-06-15,2025-07-06,churn,DataFlow Startup Churn,Startup customer 'DataFlow' migrates to competitor platform after Series A pivot. Gradual wind-down.,GPU Inference; GPU Training,Startup,-10%; -6%
 2025-08-11,2025-08-14,spike,ML Conference 2025 (NeurIPS Prep),"Same annual conference, larger spike as the platform has more Research and Startup customers.",GPU Inference; GPU Training,Research/Academic; Startup,2.2x; 2.5x; 1.5x
-2025-12-10,2025-12-10,step_change,University Research Grant Cycle,New federal research grants bring 3 universities onto the platform for large-scale training experiments.,GPU Training,Research/Academic,+12%
+2025-12-10,2025-12-24,step_change,University Research Grant Cycle,New federal research grants bring 3 universities onto the platform for large-scale training experiments.,GPU Training,Research/Academic,+12%
