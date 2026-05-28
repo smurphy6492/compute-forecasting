@@ -1,117 +1,101 @@
 # Compute Capacity Forecasting
 
-ML-driven capacity planning for a fast-growing AI compute infrastructure company. Forecasts daily compute hours using gradient boosting (LightGBM) with quantile regression for confidence intervals, plus scenario planning for board-level capacity decisions.
+ML-driven capacity planning for a fast-growing AI compute infrastructure company. Translates 36 months of usage data into actionable forecasts with confidence intervals and scenario analysis for GPU procurement decisions.
 
-## Business Context
+## The Problem
 
-Fast-growing AI compute infrastructure company facing 3-6 month GPU procurement lead times. Leadership needs to answer: **"When do we need to buy more GPUs?"**
+AI compute providers face a planning paradox: GPU procurement lead times are 3-6 months, but demand is growing 47% annually with high variance across customer segments. Order too late and customers churn to competitors. Order too early and capital sits idle.
 
-This project builds a forecasting system that produces:
+**The question this project answers:** *When do we need to buy more GPUs, and how confident should we be in that timeline?*
 
-- **60-day daily forecast** with P10/P50/P90 confidence bands — actionable for near-term capacity management
-- **Months 3-6 planning envelope** — monthly summary stats (avg, median, min, max) at each confidence level, suitable for procurement decisions with 3-6 month GPU lead times
-- **Three scenarios** layered on top:
-  - **Base:** Current trends continue
-  - **High:** Sales pipeline converts (new large customers sign)
-  - **Low:** Efficiency improvements reduce compute demand (a "DeepSeek moment")
+## Key Results
+
+![3-Year Overview](outputs/figures/overview_with_events.png)
+*Total daily compute hours across 16 series (4 compute types x 4 customer segments), with documented business events.*
+
+| Metric | Result |
+|--------|--------|
+| **Test MAPE** | 8.8% (vs. 10.5% growth-adjusted seasonal naive) |
+| **Backtesting** | Consistent across 3 walk-forward folds (7.9%-13.1%) |
+| **Coverage (P10-P90)** | 76.9% overall; GPU series under-covered at 63-67% |
+| **Top predictors** | Yesterday's value, weekly lags, rolling averages, trend |
+
+![Forecast vs Actual](outputs/figures/forecast_vs_actual.png)
+*LightGBM P50 forecast (blue) with P10-P90 confidence bands vs. actuals (black) on held-out test set (Jan-Jun 2026).*
+
+## Approach
+
+**Global LightGBM model** trained on all 16 series simultaneously, using compute type and customer segment as categorical features. One model learns shared patterns (weekly cycles, holiday effects) while categoricals capture series-specific growth rates and volatility.
+
+**Why gradient boosting over ARIMA/Prophet:** Handles 16 related series in a single fit, natively supports categorical features, and produces quantile forecasts (P10/P50/P90) without distributional assumptions.
+
+### Pipeline
+
+```
+EDA (51 cells)              Forecasting (50 cells)         Scenario Planning
+--------------------        ----------------------         -----------------
+Trend decomposition         24-feature engineering         60-day daily forecast
+ACF/PACF + stationarity     LightGBM quantile regression   3-6 month envelopes
+Event impact analysis       Conformal calibration (CQR)    Base/High/Low scenarios
+Outlier quantification      Walk-forward backtesting       Capacity threshold charts
+Correlation structure       SHAP interpretability
+                            Coverage gap investigation
+```
+
+### Feature Engineering (24 features)
+
+| Group | Features | Signal |
+|-------|----------|--------|
+| Calendar | day_of_week, month, quarter, is_weekend, is_quarter_end | Weekly/quarterly patterns |
+| Holiday | is_holiday, days_to_next, days_from_last | 15-55% demand suppression |
+| Lag | 1, 7, 14, 28, 365 days | Autoregressive structure |
+| Rolling | 7d/28d mean and std | Local level and volatility |
+| Trend | days_since_start | 47% annualized growth |
+| Categorical | compute_type, customer_segment | Series-specific patterns |
+
+![Feature Importance](outputs/figures/feature_importance.png)
+
+## Honest Limitations
+
+- **GPU series coverage gap** -- P10-P90 intervals cover only 63-67% of GPU actuals (target: 80%). Root cause: fast-growing series systematically exceed P90. Per-type conformal calibration helps but doesn't fully solve it.
+- **Single-step evaluation** -- metrics use actual lag values. True 30-90 day recursive forecasts would degrade as errors accumulate.
+- **Synthetic data** -- uses realistic synthetic data with documented events, variable growth rates, and segment-specific patterns. Not production telemetry.
+- **Hyperparameters not tuned** -- sensible defaults, not optimized via grid search.
 
 ## Dataset
 
-36 months of synthetic daily compute hours (2023-07 to 2026-06) across:
+36 months of daily compute hours (Jul 2023 - Jun 2026) across 4 compute types and 4 customer segments (17,536 rows). Key characteristics:
 
-- **4 compute types:** GPU Training, GPU Inference, CPU Batch, CPU Interactive
-- **4 customer segments:** Enterprise, Mid-Market, Startup, Research/Academic
-
-The data is synthetic but designed to feel real — every anomaly has a documented business reason:
-
-| Signal | How It Appears |
-|--------|---------------|
-| Weekly seasonality | Weekdays ~33% higher than weekends; GPU Training has flatter weekends (jobs run overnight) |
-| Annual seasonality | End-of-quarter spikes, summer dips, holiday slowdowns |
-| Growth trends | GPU Inference growing 5.4x over 3 years (inference boom); CPU Batch at 1.7x (mature) |
-| Segment differences | Startups grew 5.6x (small base, scaling fast); Research near-flat (budget-constrained) |
-| Step-changes | 3 new customer onboardings causing permanent level shifts |
-| One-time spikes | ML conference driving 2-3 day training bursts |
-| Outage | GPU cluster failure — 2-day outage + 3-day recovery, CPU unaffected |
-| Noise | Enterprise = low variance (SLA workloads), Startup = high variance (bursty) |
+- **GPU Inference** grew 5.4x (inference boom); **CPU Batch** grew 1.7x (mature)
+- **Startups** grew 5.6x from small base; **Research/Academic** near-flat at 1.6x
+- 4 step-changes (3 onboardings + 1 churn), 2 conference spikes, 1 GPU outage
+- Weekly seasonality (30-50% weekend drop), tiered holiday effects, quarterly pushes
 
 ## Project Structure
 
 ```
 compute-forecasting/
-├── README.md
-├── pyproject.toml
-├── data/
-│   ├── generate_synthetic_data.py      # Deterministic, seeded data generator
-│   ├── compute_usage.csv               # 17,536 rows (1,096 days x 16 series)
-│   ├── upcoming_events.csv             # 5 sales pipeline deals with probabilities
-│   ├── holiday_calendar.csv            # 55 US federal holidays
-│   └── event_log.csv                   # 6 documented historical events
 ├── notebooks/
-│   ├── 01_eda.ipynb                    # Part 1: Exploratory Data Analysis
-│   ├── 02_forecasting.ipynb            # Part 2: LightGBM Forecast Model
-│   └── 03_scenarios.ipynb              # Part 3: Scenario Planning & Capacity
-├── src/
-│   └── compute_forecasting/
-│       ├── features.py                 # Reusable feature engineering
-│       ├── evaluation.py               # Metrics and diagnostics
-│       └── visualization.py            # Shared chart functions
-└── outputs/
-    └── figures/                        # Saved PNGs for portfolio
+│   ├── 01_eda.ipynb                    # Exploratory analysis (51 cells)
+│   └── 02_forecasting.ipynb            # LightGBM model + evaluation (50 cells)
+├── src/compute_forecasting/
+│   └── features.py                     # Reusable feature engineering pipeline
+├── data/
+│   ├── generate_synthetic_data.py      # Deterministic data generator (seed=42)
+│   ├── compute_usage.csv               # 17,536 rows
+│   ├── event_log.csv                   # 7 documented business events
+│   └── holiday_calendar.csv            # US federal holidays (tiered severity)
+└── outputs/figures/                    # Key visualizations
 ```
-
-## Approach
-
-### Part 1: Exploratory Data Analysis
-Understand the data before modeling. Trend analysis by compute type and segment, seasonality decomposition, weekly pattern heatmaps, event impact quantification, and correlation analysis. Produces the insights that drive feature engineering decisions.
-
-### Part 2: Forecasting with LightGBM
-A global model (one LightGBM for all 16 series) with compute type and segment as categorical features. Why gradient boosting over ARIMA or Prophet:
-
-- Handles multiple related time series in a single model
-- Naturally incorporates external features (holidays, events, calendar)
-- Non-linear relationships without manual specification
-- Feature importance tells the business story
-
-**Confidence intervals** via quantile regression — train separate models for P10, P50, P90. No distributional assumptions; directly learns conditional quantiles.
-
-**Feature engineering:** Calendar features, holiday indicators, lag features (1/7/14/28/365 days), rolling statistics (7d/28d mean and std), trend proxy, and categorical interactions.
-
-### Part 3: Scenario Planning
-The executive deliverable. Three scenarios visualized against capacity thresholds:
-
-- **Base:** Model forecast assuming current trends continue
-- **High:** Sales pipeline converts — layer in expected customer signings, probability-weighted
-- **Low:** Efficiency improvements — model a 20% reduction in GPU Inference demand
-
-Includes sensitivity analysis (which assumptions move the needle most) and a capacity decision matrix.
-
-## Tech Stack
-
-- Python 3.11
-- LightGBM (gradient boosting + quantile regression)
-- pandas, numpy, scikit-learn
-- matplotlib, seaborn, plotly
-- statsmodels (seasonal decomposition)
-- Jupyter notebooks
 
 ## How to Run
 
 ```bash
-# Install dependencies
 pip install -e ".[dev]"
-
-# Generate synthetic data (deterministic, seeded)
-python data/generate_synthetic_data.py
-
-# Run notebooks in order
-jupyter notebook notebooks/01_eda.ipynb
+python data/generate_synthetic_data.py    # regenerate data (deterministic)
+jupyter notebook notebooks/01_eda.ipynb   # run notebooks in order
 ```
 
-## Key Design Decisions
+## Tech Stack
 
-1. **Global model** over per-series models — 16 series with only 1,096 days each would starve individual models. A global model shares patterns (all series drop on weekends) while categoricals capture differences.
-2. **Two-tier forecast output** — daily precision for 60 days (actionable), summary stats for months 3-6 (planning). Daily forecasts 6 months out imply false confidence.
-3. **Quantile regression** over bootstrap or Gaussian CIs — faster, no distributional assumptions, properly calibrated for asymmetric distributions.
-4. **Narrative-driven synthetic data** — every anomaly is documented in `event_log.csv`. This mirrors real-world practice where the data team maintains an event log to explain historical anomalies to the model.
-5. **Educational documentation** — every notebook section explains *why*, not just *what*. Targets a Director-level audience who needs to evaluate and communicate forecasting methodology.
+Python 3.11 | LightGBM | pandas | scikit-learn | SHAP | statsmodels | matplotlib/seaborn

@@ -6,7 +6,11 @@ build-backend = "hatchling.backends"
 name = "compute-forecasting"
 version = "0.1.0"
 description = "ML-driven compute capacity forecasting with scenario planning"
+readme = "README.md"
 requires-python = ">=3.11"
+authors = [
+    {name = "Sean Murphy"},
+]
 dependencies = [
     "pandas>=2.2.0",
     "numpy>=1.26.0",
@@ -15,6 +19,7 @@ dependencies = [
     "matplotlib>=3.9.0",
     "seaborn>=0.13.0",
     "plotly>=5.24.0",
+    "shap>=0.45.0",
     "statsmodels>=0.14.0",
     "jupyter>=1.0.0",
     "nbformat>=5.10.0",
