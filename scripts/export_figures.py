@@ -110,18 +110,34 @@ for quantile, label in [(0.5, "P50"), (0.1, "P10"), (0.9, "P90")]:
           categorical_feature=CAT_FEATURES)
     models[label] = m
 
-# Conformal calibration
+# Per-type proportional conformal calibration
 val_raw_p10 = models["P10"].predict(X_val)
+val_raw_p50 = models["P50"].predict(X_val)
 val_raw_p90 = models["P90"].predict(X_val)
-conformity_scores = np.maximum(val_raw_p10 - y_val.values, y_val.values - val_raw_p90)
-n_cal = len(conformity_scores)
-q_level = min(np.ceil((n_cal + 1) * 0.80) / n_cal, 1.0)
-conformal_adj = np.quantile(conformity_scores, q_level)
+
+type_pct_adj = {}
+for ctype in ["GPU Training", "GPU Inference", "CPU Batch", "CPU Interactive"]:
+    mask = (val["compute_type"] == ctype).values
+    raw_scores = np.maximum(val_raw_p10[mask] - y_val.values[mask], y_val.values[mask] - val_raw_p90[mask])
+    pct_scores = raw_scores / np.maximum(val_raw_p50[mask], 1)
+    n_t = len(pct_scores)
+    q_t = min(np.ceil((n_t + 1) * 0.80) / n_t, 1.0)
+    type_pct_adj[ctype] = np.quantile(pct_scores, q_t)
+
+raw_test_p10 = models["P10"].predict(X_test)
+raw_test_p50 = models["P50"].predict(X_test)
+raw_test_p90 = models["P90"].predict(X_test)
+test_cal_p10 = np.zeros(len(test))
+test_cal_p90 = np.zeros(len(test))
+for ctype, pct_adj in type_pct_adj.items():
+    mask = (test["compute_type"] == ctype).values
+    test_cal_p10[mask] = raw_test_p10[mask] - pct_adj * raw_test_p50[mask]
+    test_cal_p90[mask] = raw_test_p90[mask] + pct_adj * raw_test_p50[mask]
 
 test_preds = {
-    "P50": models["P50"].predict(X_test),
-    "P10": models["P10"].predict(X_test) - conformal_adj,
-    "P90": models["P90"].predict(X_test) + conformal_adj,
+    "P50": raw_test_p50,
+    "P10": test_cal_p10,
+    "P90": test_cal_p90,
 }
 
 fig, axes = plt.subplots(2, 2, figsize=(14, 9))
