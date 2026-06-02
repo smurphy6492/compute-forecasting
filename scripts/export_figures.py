@@ -147,8 +147,8 @@ test_preds = {
 
 fig, axes = plt.subplots(2, 2, figsize=(14, 9))
 series_to_plot = [
-    ("GPU Training", "Enterprise"), ("GPU Inference", "Startup"),
-    ("CPU Batch", "Mid-Market"), ("CPU Interactive", "Research/Academic"),
+    ("GPU Training", "Mid-Market"), ("GPU Inference", "Enterprise"),
+    ("CPU Batch", "Enterprise"), ("CPU Interactive", "Startup"),
 ]
 for ax, (ctype, seg) in zip(axes.flat, series_to_plot):
     mask = (test["compute_type"] == ctype) & (test["customer_segment"] == seg)
