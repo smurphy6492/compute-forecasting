@@ -189,7 +189,13 @@ def build_features(
     df = add_lag_features(df, group_cols, target_col, lags)
     df = add_rolling_features(df, group_cols, target_col, rolling_windows)
     df = add_trend_feature(df)
-    df = encode_categoricals(df)
+
+    # Series interaction: compute_type × customer_segment as a single categorical
+    # Lets the model split directly on specific series (e.g., "Enterprise GPU Training")
+    # without requiring multiple tree splits through separate categoricals
+    df["series_id"] = df["compute_type"].astype(str) + " | " + df["customer_segment"].astype(str)
+
+    df = encode_categoricals(df, cat_cols=["compute_type", "customer_segment", "series_id"])
 
     return df.sort_values(group_cols + ["date"]).reset_index(drop=True)
 

@@ -83,7 +83,6 @@ print("Generating: forecast_vs_actual.png")
 df = build_features(usage, holidays)
 feature_cols = get_feature_columns(df)
 TARGET = "compute_hours"
-CAT_FEATURES = ["compute_type", "customer_segment"]
 
 train = df[df["date"] <= TRAIN_END].copy()
 val = df[(df["date"] > TRAIN_END) & (df["date"] <= VAL_END)].copy()
@@ -100,20 +99,26 @@ PARAMS = {
     "reg_lambda": 1.0, "n_estimators": 2000, "random_state": 42, "verbose": -1,
 }
 
+CAT_FEATURES = ["compute_type", "customer_segment", "series_id"]
+
+# Train on log-transformed target
+y_train_log = np.log1p(y_train)
+y_val_log = np.log1p(y_val)
+
 models = {}
 for quantile, label in [(0.5, "P50"), (0.1, "P10"), (0.9, "P90")]:
     params_q = PARAMS.copy()
     params_q["alpha"] = quantile
     m = lgb.LGBMRegressor(**params_q)
-    m.fit(X_train, y_train, eval_set=[(X_val, y_val)],
+    m.fit(X_train, y_train_log, eval_set=[(X_val, y_val_log)],
           callbacks=[lgb.early_stopping(stopping_rounds=50, verbose=False), lgb.log_evaluation(period=0)],
           categorical_feature=CAT_FEATURES)
     models[label] = m
 
-# Per-type proportional conformal calibration
-val_raw_p10 = models["P10"].predict(X_val)
-val_raw_p50 = models["P50"].predict(X_val)
-val_raw_p90 = models["P90"].predict(X_val)
+# Per-type proportional conformal calibration (on real-scale predictions)
+val_raw_p10 = np.expm1(models["P10"].predict(X_val))
+val_raw_p50 = np.expm1(models["P50"].predict(X_val))
+val_raw_p90 = np.expm1(models["P90"].predict(X_val))
 
 type_pct_adj = {}
 for ctype in ["GPU Training", "GPU Inference", "CPU Batch", "CPU Interactive"]:
@@ -124,9 +129,9 @@ for ctype in ["GPU Training", "GPU Inference", "CPU Batch", "CPU Interactive"]:
     q_t = min(np.ceil((n_t + 1) * 0.80) / n_t, 1.0)
     type_pct_adj[ctype] = np.quantile(pct_scores, q_t)
 
-raw_test_p10 = models["P10"].predict(X_test)
-raw_test_p50 = models["P50"].predict(X_test)
-raw_test_p90 = models["P90"].predict(X_test)
+raw_test_p10 = np.expm1(models["P10"].predict(X_test))
+raw_test_p50 = np.expm1(models["P50"].predict(X_test))
+raw_test_p90 = np.expm1(models["P90"].predict(X_test))
 test_cal_p10 = np.zeros(len(test))
 test_cal_p90 = np.zeros(len(test))
 for ctype, pct_adj in type_pct_adj.items():
