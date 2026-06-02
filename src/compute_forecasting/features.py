@@ -6,8 +6,11 @@ Designed for a global LightGBM model across all (compute_type, customer_segment)
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import pandas as pd
 import numpy as np
+from numpy.polynomial.polynomial import polyfit
 
 
 def add_calendar_features(df: pd.DataFrame, date_col: str = "date") -> pd.DataFrame:
@@ -205,3 +208,152 @@ def get_feature_columns(df: pd.DataFrame, exclude: list[str] | None = None) -> l
     if exclude is None:
         exclude = ["date", "compute_hours"]
     return [c for c in df.columns if c not in exclude]
+
+
+# ---------------------------------------------------------------------------
+# Hybrid Trend + Residual Model Support
+# ---------------------------------------------------------------------------
+
+MAX_MONTHLY_GROWTH_RATE = 0.05  # Cap: 5% per month (~80% annualized)
+RESIDUAL_CLIP_RANGE = (0.1, 10.0)  # Clip residual ratios to prevent extremes
+
+
+@dataclass
+class SeriesTrend:
+    """Fitted exponential trend parameters for a single series."""
+
+    series_key: tuple[str, str]
+    log_intercept: float  # log(a) in log(y) = log(a) + b*t
+    daily_growth_rate: float  # b (already capped)
+    origin_date: pd.Timestamp  # t=0 reference date
+
+    def predict(self, dates: pd.Series | pd.DatetimeIndex) -> np.ndarray:
+        """Extrapolate the trend to arbitrary dates."""
+        delta = pd.to_datetime(dates) - self.origin_date
+        # .dt.days for Series, .days for DatetimeIndex/TimedeltaIndex
+        t = delta.dt.days.values if hasattr(delta, "dt") else delta.days.values
+        return np.exp(self.log_intercept + self.daily_growth_rate * t)
+
+
+def fit_series_trends(
+    df: pd.DataFrame,
+    group_cols: list[str] | None = None,
+    target_col: str = "compute_hours",
+    date_col: str = "date",
+) -> dict[tuple[str, ...], SeriesTrend]:
+    """Fit per-series exponential trends via log-linear regression.
+
+    For each series: log(y) = log(a) + b*t, where t = days since origin.
+    Growth rate is capped at MAX_MONTHLY_GROWTH_RATE / 30 per day.
+
+    Parameters
+    ----------
+    df : Training data (only pass training rows to avoid data leakage)
+    group_cols : Columns defining each series
+    target_col : Target column name
+    date_col : Date column name
+
+    Returns
+    -------
+    Dict mapping series key tuple to fitted SeriesTrend.
+    """
+    if group_cols is None:
+        group_cols = ["compute_type", "customer_segment"]
+
+    max_daily_rate = np.log(1 + MAX_MONTHLY_GROWTH_RATE) / 30
+    origin_date = df[date_col].min()
+    trends: dict[tuple[str, ...], SeriesTrend] = {}
+
+    for key, grp in df.groupby(group_cols, observed=True):
+        if not isinstance(key, tuple):
+            key = (key,)
+
+        t = (grp[date_col] - origin_date).dt.days.values.astype(float)
+        y = grp[target_col].values.astype(float)
+
+        # Filter out zeros/negatives for log transform
+        valid = y > 0
+        t_valid, log_y = t[valid], np.log(y[valid])
+
+        # Fit: log(y) = c0 + c1*t (polyfit degree 1, coefficients in ascending order)
+        c0, c1 = polyfit(t_valid, log_y, deg=1)
+
+        # Cap growth rate
+        c1_capped = min(c1, max_daily_rate)
+
+        trends[key] = SeriesTrend(
+            series_key=key,
+            log_intercept=c0,
+            daily_growth_rate=c1_capped,
+            origin_date=origin_date,
+        )
+
+    return trends
+
+
+def compute_residual_ratios(
+    df: pd.DataFrame,
+    trends: dict[tuple[str, ...], SeriesTrend],
+    group_cols: list[str] | None = None,
+    target_col: str = "compute_hours",
+    date_col: str = "date",
+) -> pd.Series:
+    """Compute residual ratio = actual / trend(t) for each row.
+
+    Result is clipped to RESIDUAL_CLIP_RANGE to prevent extreme values.
+    """
+    if group_cols is None:
+        group_cols = ["compute_type", "customer_segment"]
+
+    ratios = pd.Series(np.nan, index=df.index, dtype=float)
+
+    for key, grp in df.groupby(group_cols, observed=True):
+        if not isinstance(key, tuple):
+            key = (key,)
+        trend = trends[key]
+        trend_values = trend.predict(grp[date_col])
+        raw_ratio = grp[target_col].values / np.maximum(trend_values, 1.0)
+        clipped = np.clip(raw_ratio, *RESIDUAL_CLIP_RANGE)
+        ratios.loc[grp.index] = clipped
+
+    return ratios
+
+
+def predict_with_trend(
+    df: pd.DataFrame,
+    lgb_log_residual_preds: np.ndarray,
+    trends: dict[tuple[str, ...], SeriesTrend],
+    group_cols: list[str] | None = None,
+    date_col: str = "date",
+) -> np.ndarray:
+    """Reconstruct real-scale predictions: trend(t) * exp(lgb_prediction).
+
+    Parameters
+    ----------
+    df : DataFrame with date and group columns (for trend lookup)
+    lgb_log_residual_preds : LightGBM predictions of log(residual_ratio)
+    trends : Fitted trend dict from fit_series_trends
+    group_cols : Series grouping columns
+    date_col : Date column name
+
+    Returns
+    -------
+    Real-scale predictions array aligned with df index order.
+    """
+    if group_cols is None:
+        group_cols = ["compute_type", "customer_segment"]
+
+    result = np.zeros(len(df))
+
+    for key, grp in df.groupby(group_cols, observed=True):
+        if not isinstance(key, tuple):
+            key = (key,)
+        trend = trends[key]
+        trend_values = trend.predict(grp[date_col])
+        idx = grp.index
+        # Map DataFrame positions to array positions
+        positions = [df.index.get_loc(i) for i in idx]
+        residual_preds = np.exp(lgb_log_residual_preds[positions])
+        result[positions] = trend_values * residual_preds
+
+    return result
