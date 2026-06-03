@@ -1,10 +1,12 @@
 # Compute Capacity Forecasting
 
-ML-driven capacity planning for a fast-growing AI compute infrastructure company. Translates 36 months of usage data into actionable forecasts with confidence intervals and scenario analysis for GPU procurement decisions.
+ML-driven capacity planning for an AI compute infrastructure company. Demonstrates end-to-end forecasting methodology — from EDA through scenario planning — on realistic synthetic data, with a hybrid trend + residual model that solves the tree-model extrapolation problem.
+
+> **Note:** This project uses realistic synthetic data to demonstrate methodology, not production telemetry. The data simulates 16 compute series with real-world patterns (step-changes, seasonality, outages, variable growth rates). All metrics are evaluated on held-out test periods.
 
 ## The Problem
 
-AI compute providers face a planning paradox: GPU procurement lead times are 3-6 months, but demand is growing 47% annually with high variance across customer segments. Order too late and customers churn to competitors. Order too early and capital sits idle.
+AI compute providers face a planning paradox: GPU procurement lead times are 3-6 months, but demand can grow 40-80% annually with high variance across customer segments. Order too late and customers churn to competitors. Order too early and capital sits idle.
 
 **The question this project answers:** *When do we need to buy more GPUs, and how confident should we be in that timeline?*
 
@@ -27,7 +29,7 @@ AI compute providers face a planning paradox: GPU procurement lead times are 3-6
 
 **Hybrid trend + residual decomposition** separates per-series exponential growth from cyclical patterns, solving the tree-model extrapolation problem for fast-growing series. A global LightGBM model trained on all 16 series simultaneously learns shared patterns (weekly cycles, holiday effects) while categorical features capture series-specific volatility.
 
-**Why gradient boosting over ARIMA/Prophet:** Empirically validated — on aggregated daily totals (a deliberately favorable setup for single-series methods), LightGBM Hybrid achieves 2.4% MAPE vs. Prophet at 10.7% and SARIMAX at 28.9%. The global model handles 16 related series in a single fit, natively supports categorical features, and produces quantile forecasts (P10/P50/P90) without distributional assumptions.
+**Why gradient boosting over ARIMA/Prophet:** On aggregated daily totals, LightGBM Hybrid achieves 2.4% MAPE vs. Prophet at 10.7% and SARIMAX at 28.9%. This comparison is illustrative, not apples-to-apples — LightGBM benefits from disaggregated 16-series training data while Prophet/SARIMAX run on the single aggregated series. The structural advantages are real though: a global model handles all 16 series in a single fit, natively supports categorical features, and produces quantile forecasts (P10/P50/P90) without distributional assumptions.
 
 ### Pipeline
 
@@ -52,7 +54,7 @@ Correlation structure       Walk-forward backtesting        Shortfall magnitude 
 | Holiday | is_holiday, days_to_next, days_from_last | 15-55% demand suppression |
 | Lag | 1, 7, 14, 28, 365 days | Autoregressive structure |
 | Rolling | 7d/28d mean and std | Local level and volatility |
-| Trend | days_since_start | 47% annualized growth |
+| Trend | days_since_start | ~47% annualized growth (synthetic) |
 | Categorical | compute_type, customer_segment | Series-specific patterns |
 | Interaction | series_id (type x segment) | Per-series trend interaction |
 
@@ -60,10 +62,10 @@ Correlation structure       Walk-forward backtesting        Shortfall magnitude 
 
 ## Honest Limitations
 
-- **Recursive forecast validated** -- single-step MAPE (7.94%) matches recursive 6-month MAPE (7.95%), confirming the hybrid decomposition produces stable recursive forecasts.
+- **Synthetic data** -- the model is validated on data I designed, not production telemetry. Real compute usage has messier patterns, missing data, and distribution drift that would likely degrade performance. The methodology is the point, not the specific numbers.
 - **Startup series remain noisy** -- coverage is 73% for Startup segment due to inherent demand volatility. Enterprise and Mid-Market exceed 85%.
-- **Synthetic data** -- uses realistic synthetic data with documented events, variable growth rates, and segment-specific patterns. Not production telemetry.
 - **Hyperparameters not tuned** -- sensible defaults, not optimized via grid search.
+- **Recursive forecast validated** -- single-step MAPE (7.94%) matches recursive 6-month MAPE (7.95%), confirming the hybrid decomposition produces stable recursive forecasts.
 
 ## Production Considerations
 
