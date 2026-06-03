@@ -20,6 +20,8 @@ from compute_forecasting.features import (
     fit_series_trends,
     compute_residual_ratios,
     predict_with_trend,
+    compute_conformal_adjustments,
+    apply_conformal_calibration,
 )
 
 OUT = ROOT / "outputs" / "figures"
@@ -132,21 +134,10 @@ val_p50 = predict_with_trend(val, models["P50"].predict(X_val), trends)
 val_p10_raw = predict_with_trend(val, models["P10"].predict(X_val), trends)
 val_p90_raw = predict_with_trend(val, models["P90"].predict(X_val), trends)
 
-type_pct_adj = {}
-for ctype in ["GPU Training", "GPU Inference", "CPU Batch", "CPU Interactive"]:
-    mask = (val["compute_type"] == ctype).values
-    raw_scores = np.maximum(val_p10_raw[mask] - y_val.values[mask], y_val.values[mask] - val_p90_raw[mask])
-    pct_scores = raw_scores / np.maximum(val_p50[mask], 1)
-    n_t = len(pct_scores)
-    q_t = min(np.ceil((n_t + 1) * 0.80) / n_t, 1.0)
-    type_pct_adj[ctype] = np.quantile(pct_scores, q_t)
-
-test_cal_p10 = np.zeros(len(test))
-test_cal_p90 = np.zeros(len(test))
-for ctype, pct_adj in type_pct_adj.items():
-    mask = (test["compute_type"] == ctype).values
-    test_cal_p10[mask] = test_p10_raw[mask] - pct_adj * test_p50[mask]
-    test_cal_p90[mask] = test_p90_raw[mask] + pct_adj * test_p50[mask]
+type_pct_adj = compute_conformal_adjustments(val, val_p10_raw, val_p50, val_p90_raw, y_val.values)
+test_cal_p10, test_cal_p90 = apply_conformal_calibration(
+    test, test_p10_raw, test_p50, test_p90_raw, type_pct_adj
+)
 
 test_preds = {"P50": test_p50, "P10": test_cal_p10, "P90": test_cal_p90}
 

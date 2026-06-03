@@ -64,6 +64,21 @@ Correlation structure       Walk-forward backtesting
 - **Synthetic data** -- uses realistic synthetic data with documented events, variable growth rates, and segment-specific patterns. Not production telemetry.
 - **Hyperparameters not tuned** -- sensible defaults, not optimized via grid search.
 
+## Production Considerations
+
+### Why P90 for capacity planning
+
+GPU stockouts and idle capacity have asymmetric costs. A stockout means Enterprise customers hit quota limits, trigger SLA penalties, and potentially churn to competitors — a revenue impact that dwarfs the carrying cost of idle GPUs for a few weeks. P90 (rather than P75 or P95) balances this asymmetry: it provides a ~90% probability of meeting demand while keeping the over-provisioning buffer reasonable. For the highest-value GPU Training series, P95 may be worth the extra capital given the churn risk.
+
+### Model monitoring and retraining
+
+In production, this model would need drift detection to trigger retraining:
+
+- **Rolling MAPE tracking**: Compute 28-day rolling MAPE per compute type. If any series exceeds 15% (roughly 2x the baseline) for 7+ consecutive days, flag for investigation.
+- **Coverage monitoring**: Track whether actuals fall within P10-P90 bands. If weekly coverage drops below 70% (vs. the 80% target), the conformal calibration needs refreshing.
+- **Trend break detection**: A major customer onboarding or churn will cause a step-change the model can't predict from lagged features alone. Monitor for residuals that are consistently one-directional for 5+ days.
+- **Retraining cadence**: Monthly retraining with a rolling 24-month window, plus ad-hoc retraining after documented business events (onboardings, outages, pricing changes).
+
 ## Dataset
 
 36 months of daily compute hours (Jul 2023 - Jun 2026) across 4 compute types and 4 customer segments (17,536 rows). Key characteristics:

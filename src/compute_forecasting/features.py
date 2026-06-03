@@ -203,6 +203,26 @@ def build_features(
     return df.sort_values(group_cols + ["date"]).reset_index(drop=True)
 
 
+# Canonical feature column list for alignment validation.
+# If you add/remove features from build_features(), update this list AND
+# the build_row_features() function in notebooks/03_scenarios.ipynb.
+FEATURE_COLUMNS = [
+    # Categoricals
+    "compute_type", "customer_segment", "series_id",
+    # Calendar
+    "day_of_week", "month", "day_of_month", "week_of_year",
+    "is_weekend", "quarter", "day_of_year", "day_of_quarter", "is_quarter_end",
+    # Holiday
+    "is_holiday", "days_to_next_holiday", "days_from_last_holiday",
+    # Lags
+    "lag_1", "lag_7", "lag_14", "lag_28", "lag_365",
+    # Rolling
+    "rolling_mean_7", "rolling_std_7", "rolling_mean_28", "rolling_std_28",
+    # Trend
+    "days_since_start",
+]
+
+
 def get_feature_columns(df: pd.DataFrame, exclude: list[str] | None = None) -> list[str]:
     """Return the list of feature columns (everything except date and target)."""
     if exclude is None:

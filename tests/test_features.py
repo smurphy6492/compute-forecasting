@@ -9,11 +9,13 @@ import pandas as pd
 import pytest
 
 from compute_forecasting.features import (
+    FEATURE_COLUMNS,
     add_calendar_features,
     add_lag_features,
     build_features,
     compute_residual_ratios,
     fit_series_trends,
+    get_feature_columns,
     predict_with_trend,
 )
 
@@ -196,6 +198,26 @@ def test_predict_with_trend_round_trip(sample_data):
             actual, expected, rtol=1e-10,
             err_msg="predict_with_trend should equal trend when log-residual is 0"
         )
+
+
+def test_feature_columns_alignment(usage_data, holidays_data):
+    """Verify build_features output matches FEATURE_COLUMNS constant.
+
+    If this test fails, FEATURE_COLUMNS and the build_row_features()
+    function in notebooks/03_scenarios.ipynb need to be updated to match.
+    """
+    df = build_features(usage_data, holidays_data)
+    actual_features = set(get_feature_columns(df))
+    expected_features = set(FEATURE_COLUMNS)
+
+    missing = expected_features - actual_features
+    extra = actual_features - expected_features
+
+    assert not missing, f"FEATURE_COLUMNS lists columns not produced by build_features: {missing}"
+    assert not extra, (
+        f"build_features produces columns not in FEATURE_COLUMNS: {extra}. "
+        f"Update FEATURE_COLUMNS in features.py and build_row_features() in 03_scenarios.ipynb."
+    )
 
 
 def test_predict_with_trend_vectorization(sample_data):
