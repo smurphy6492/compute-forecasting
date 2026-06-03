@@ -351,9 +351,120 @@ def predict_with_trend(
         trend = trends[key]
         trend_values = trend.predict(grp[date_col])
         idx = grp.index
-        # Map DataFrame positions to array positions
-        positions = [df.index.get_loc(i) for i in idx]
+        # Vectorized position mapping: create boolean mask for O(n) instead of O(n²)
+        positions = df.index.get_indexer(idx)
         residual_preds = np.exp(lgb_log_residual_preds[positions])
         result[positions] = trend_values * residual_preds
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Conformal Prediction Calibration
+# ---------------------------------------------------------------------------
+
+
+def compute_conformal_adjustments(
+    val_df: pd.DataFrame,
+    val_p10: np.ndarray,
+    val_p50: np.ndarray,
+    val_p90: np.ndarray,
+    y_val: np.ndarray,
+    target_coverage: float = 0.80,
+    type_col: str = "compute_type",
+) -> dict[str, float]:
+    """Compute per-type proportional conformal adjustments from validation data.
+
+    For each compute type, calculates the quantile of non-conformity scores needed
+    to achieve the target coverage probability. Scores are expressed as a proportion
+    of the P50 prediction to make adjustments scale-invariant across series with
+    different magnitudes.
+
+    Parameters
+    ----------
+    val_df : Validation DataFrame with type_col column
+    val_p10 : P10 predictions on validation set
+    val_p50 : P50 predictions on validation set
+    val_p90 : P90 predictions on validation set
+    y_val : Actual target values on validation set
+    target_coverage : Desired empirical coverage probability (default 0.80)
+    type_col : Column name for compute type grouping
+
+    Returns
+    -------
+    Dict mapping compute type to proportional adjustment factor (0 to 1 scale).
+    Multiply by P50 to get absolute adjustment width.
+
+    Example
+    -------
+    >>> adjustments = compute_conformal_adjustments(val, val_p10, val_p50, val_p90, y_val)
+    >>> # adjustments might be {"GPU Training": 0.15, "CPU Batch": 0.08, ...}
+    """
+    type_adjustments = {}
+
+    for ctype in val_df[type_col].unique():
+        mask = (val_df[type_col] == ctype).values
+
+        # Non-conformity score: max distance outside [P10, P90] band
+        raw_scores = np.maximum(
+            val_p10[mask] - y_val[mask],
+            y_val[mask] - val_p90[mask],
+        )
+
+        # Express as proportion of P50 (scale-invariant)
+        pct_scores = raw_scores / np.maximum(val_p50[mask], 1)
+
+        # Compute adjusted quantile for finite-sample coverage guarantee
+        n_t = len(pct_scores)
+        q_t = min(np.ceil((n_t + 1) * target_coverage) / n_t, 1.0)
+        pct_adj = np.quantile(pct_scores, q_t)
+
+        type_adjustments[ctype] = pct_adj
+
+    return type_adjustments
+
+
+def apply_conformal_calibration(
+    test_df: pd.DataFrame,
+    test_p10: np.ndarray,
+    test_p50: np.ndarray,
+    test_p90: np.ndarray,
+    adjustments: dict[str, float],
+    type_col: str = "compute_type",
+) -> tuple[np.ndarray, np.ndarray]:
+    """Apply per-type proportional conformal adjustments to prediction intervals.
+
+    Widens the [P10, P90] interval symmetrically around P50 using pre-computed
+    adjustments. Each type gets a proportional adjustment (% of P50), so larger
+    series get wider absolute bands while maintaining consistent relative coverage.
+
+    Parameters
+    ----------
+    test_df : Test DataFrame with type_col column
+    test_p10 : P10 predictions on test set
+    test_p50 : P50 predictions on test set
+    test_p90 : P90 predictions on test set
+    adjustments : Dict of proportional adjustments from compute_conformal_adjustments
+    type_col : Column name for compute type grouping
+
+    Returns
+    -------
+    Tuple of (calibrated_p10, calibrated_p90) arrays with adjusted prediction intervals.
+
+    Example
+    -------
+    >>> adjustments = compute_conformal_adjustments(val, val_p10, val_p50, val_p90, y_val)
+    >>> cal_p10, cal_p90 = apply_conformal_calibration(
+    ...     test, test_p10, test_p50, test_p90, adjustments
+    ... )
+    """
+    cal_p10 = np.zeros(len(test_df))
+    cal_p90 = np.zeros(len(test_df))
+
+    for ctype, pct_adj in adjustments.items():
+        mask = (test_df[type_col] == ctype).values
+        # Symmetric adjustment around P50
+        cal_p10[mask] = test_p10[mask] - pct_adj * test_p50[mask]
+        cal_p90[mask] = test_p90[mask] + pct_adj * test_p50[mask]
+
+    return cal_p10, cal_p90

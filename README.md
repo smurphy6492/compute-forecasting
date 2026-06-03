@@ -15,9 +15,9 @@ AI compute providers face a planning paradox: GPU procurement lead times are 3-6
 
 | Metric | Result |
 |--------|--------|
-| **Test MAPE** | 8.8% (vs. 10.5% growth-adjusted seasonal naive) |
-| **Backtesting** | Consistent across 3 walk-forward folds (7.9%-13.1%) |
-| **Coverage (P10-P90)** | 76.9% overall; GPU series under-covered at 63-67% |
+| **Test MAPE** | 7.94% (vs. 10.5% growth-adjusted seasonal naive) |
+| **Backtesting** | Consistent across 3 walk-forward folds (7.1%-13.2%) |
+| **Coverage (P10-P90)** | 83.8% overall (GPU Training 80.7%, GPU Inference 82.3%) |
 | **Top predictors** | Yesterday's value, weekly lags, rolling averages, trend |
 
 ![Forecast vs Actual](outputs/figures/forecast_vs_actual.png)
@@ -25,7 +25,7 @@ AI compute providers face a planning paradox: GPU procurement lead times are 3-6
 
 ## Approach
 
-**Global LightGBM model** trained on all 16 series simultaneously, using compute type and customer segment as categorical features. One model learns shared patterns (weekly cycles, holiday effects) while categoricals capture series-specific growth rates and volatility.
+**Hybrid trend + residual decomposition** separates per-series exponential growth from cyclical patterns, solving the tree-model extrapolation problem for fast-growing series. A global LightGBM model trained on all 16 series simultaneously learns shared patterns (weekly cycles, holiday effects) while categorical features capture series-specific volatility.
 
 **Why gradient boosting over ARIMA/Prophet:** Handles 16 related series in a single fit, natively supports categorical features, and produces quantile forecasts (P10/P50/P90) without distributional assumptions.
 
@@ -34,15 +34,16 @@ AI compute providers face a planning paradox: GPU procurement lead times are 3-6
 ```
 EDA (51 cells)              Forecasting (50 cells)         Scenario Planning
 --------------------        ----------------------         -----------------
-Trend decomposition         24-feature engineering         60-day daily forecast
-ACF/PACF + stationarity     LightGBM quantile regression   3-6 month envelopes
-Event impact analysis       Conformal calibration (CQR)    Base/High/Low scenarios
-Outlier quantification      Walk-forward backtesting       Capacity threshold charts
-Correlation structure       SHAP interpretability
-                            Coverage gap investigation
+Trend decomposition         25-feature engineering         60-day daily forecast
+ACF/PACF + stationarity     Hybrid trend+residual model    3-6 month envelopes
+Event impact analysis       LightGBM quantile regression   Base/High/Low scenarios
+Outlier quantification      Conformal calibration (CQR)    Capacity threshold charts
+Correlation structure       Walk-forward backtesting
+                            Recursive forecast validation
+                            SHAP interpretability
 ```
 
-### Feature Engineering (24 features)
+### Feature Engineering (25 features)
 
 | Group | Features | Signal |
 |-------|----------|--------|
@@ -52,13 +53,14 @@ Correlation structure       SHAP interpretability
 | Rolling | 7d/28d mean and std | Local level and volatility |
 | Trend | days_since_start | 47% annualized growth |
 | Categorical | compute_type, customer_segment | Series-specific patterns |
+| Interaction | series_id (type x segment) | Per-series trend interaction |
 
 ![Feature Importance](outputs/figures/feature_importance.png)
 
 ## Honest Limitations
 
-- **GPU series coverage gap** -- P10-P90 intervals cover only 63-67% of GPU actuals (target: 80%). Root cause: fast-growing series systematically exceed P90. Per-type conformal calibration helps but doesn't fully solve it.
-- **Single-step evaluation** -- metrics use actual lag values. True 30-90 day recursive forecasts would degrade as errors accumulate.
+- **Recursive forecast validated** -- single-step MAPE (7.94%) matches recursive 6-month MAPE (7.95%), confirming the hybrid decomposition produces stable recursive forecasts.
+- **Startup series remain noisy** -- coverage is 73% for Startup segment due to inherent demand volatility. Enterprise and Mid-Market exceed 85%.
 - **Synthetic data** -- uses realistic synthetic data with documented events, variable growth rates, and segment-specific patterns. Not production telemetry.
 - **Hyperparameters not tuned** -- sensible defaults, not optimized via grid search.
 
@@ -77,9 +79,10 @@ Correlation structure       SHAP interpretability
 compute-forecasting/
 ├── notebooks/
 │   ├── 01_eda.ipynb                    # Exploratory analysis (51 cells)
-│   └── 02_forecasting.ipynb            # LightGBM model + evaluation (50 cells)
+│   ├── 02_forecasting.ipynb            # LightGBM model + evaluation (67 cells)
+│   └── 03_scenarios.ipynb              # Scenario planning + capacity analysis (32 cells)
 ├── src/compute_forecasting/
-│   └── features.py                     # Reusable feature engineering pipeline
+│   └── features.py                     # Feature engineering + hybrid model support
 ├── data/
 │   ├── generate_synthetic_data.py      # Deterministic data generator (seed=42)
 │   ├── compute_usage.csv               # 17,536 rows
