@@ -21,6 +21,7 @@ dependencies = [
     "plotly>=5.24.0",
     "shap>=0.45.0",
     "statsmodels>=0.14.0",
+    "prophet>=1.1.0",
     "jupyter>=1.0.0",
     "nbformat>=5.10.0",
 ]
