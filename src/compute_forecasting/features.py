@@ -488,3 +488,117 @@ def apply_conformal_calibration(
         cal_p90[mask] = test_p90[mask] + pct_adj * test_p50[mask]
 
     return cal_p10, cal_p90
+
+
+# ---------------------------------------------------------------------------
+# Recursive Forecasting Support
+# ---------------------------------------------------------------------------
+
+
+class RecursiveFeatureBuilder:
+    """Builds feature dicts for one-at-a-time recursive forecasting.
+
+    Encapsulates the historical data lookup, prediction cache, and holiday
+    calendar needed to construct features when forecasting day by day.
+    Used by both the scenario notebook and the recursive backtest script.
+
+    Parameters
+    ----------
+    usage : DataFrame with [date, compute_type, customer_segment, compute_hours]
+    holidays : DataFrame with a 'date' column of holiday dates
+    """
+
+    def __init__(self, usage: pd.DataFrame, holidays: pd.DataFrame) -> None:
+        self.holiday_dates_set = set(holidays["date"].dt.date)
+        self.holiday_arr = np.array(
+            sorted(pd.Timestamp(d) for d in holidays["date"].dt.date.unique())
+        )
+        self.origin = usage["date"].min()
+        self._hist_lookup: dict[tuple, float] = (
+            usage.set_index(["date", "compute_type", "customer_segment"])["compute_hours"]
+            .to_dict()
+        )
+        self._pred_cache: dict[tuple, float] = {}
+
+    def get_value(self, dt: pd.Timestamp, ct: str, seg: str) -> float:
+        """Get actual or predicted value for a (date, type, segment)."""
+        key = (dt, ct, seg)
+        if key in self._hist_lookup:
+            return self._hist_lookup[key]
+        return self._pred_cache.get(key, np.nan)
+
+    def cache_prediction(self, dt: pd.Timestamp, ct: str, seg: str, value: float) -> None:
+        """Store a predicted value for use as future lag features."""
+        self._pred_cache[(dt, ct, seg)] = value
+
+    def clear_cache(self) -> None:
+        """Reset prediction cache (e.g., between forecast runs)."""
+        self._pred_cache.clear()
+
+    def build_row(self, dt: pd.Timestamp, ct: str, seg: str) -> dict:
+        """Build a feature dict for a single (date, compute_type, segment).
+
+        Produces the same features as build_features() but for one row,
+        using cached predictions for lag/rolling values when actuals are
+        not available.
+        """
+        ts = pd.Timestamp(dt) if not isinstance(dt, pd.Timestamp) else dt
+        d = ts.date() if hasattr(ts, "date") else ts
+
+        # Calendar
+        qstart = ts.to_period("Q").start_time
+        qend = ts.to_period("Q").end_time.date()
+        days_to_qe = (pd.Timestamp(qend) - ts).days
+
+        # Holiday proximity
+        future_h = self.holiday_arr[self.holiday_arr >= ts]
+        past_h = self.holiday_arr[self.holiday_arr <= ts]
+        dtn = int((future_h[0] - ts).days) if len(future_h) > 0 else 30
+        dfl = int((ts - past_h[-1]).days) if len(past_h) > 0 else 30
+
+        # Lags
+        lag_vals = {}
+        for lag in [1, 7, 14, 28, 365]:
+            lag_date = ts - pd.Timedelta(days=lag)
+            lag_vals[f"lag_{lag}"] = self.get_value(lag_date, ct, seg)
+
+        # Rolling features (from available recent values)
+        recent_7 = []
+        for offset in range(1, 8):
+            v = self.get_value(ts - pd.Timedelta(days=offset), ct, seg)
+            if not np.isnan(v):
+                recent_7.append(v)
+        rm7 = np.mean(recent_7) if recent_7 else np.nan
+        rs7 = np.std(recent_7, ddof=1) if len(recent_7) > 1 else np.nan
+
+        recent_28 = []
+        for offset in range(1, 29):
+            v = self.get_value(ts - pd.Timedelta(days=offset), ct, seg)
+            if not np.isnan(v):
+                recent_28.append(v)
+        rm28 = np.mean(recent_28) if recent_28 else np.nan
+        rs28 = np.std(recent_28, ddof=1) if len(recent_28) > 1 else np.nan
+
+        return {
+            "compute_type": ct,
+            "customer_segment": seg,
+            "day_of_week": ts.dayofweek,
+            "month": ts.month,
+            "day_of_month": ts.day,
+            "week_of_year": ts.isocalendar()[1],
+            "is_weekend": int(ts.dayofweek >= 5),
+            "quarter": ts.quarter,
+            "day_of_year": ts.dayofyear,
+            "day_of_quarter": (ts - qstart).days + 1,
+            "is_quarter_end": int(days_to_qe <= 10),
+            "is_holiday": int(d in self.holiday_dates_set),
+            "days_to_next_holiday": min(dtn, 30),
+            "days_from_last_holiday": min(dfl, 30),
+            **lag_vals,
+            "rolling_mean_7": rm7,
+            "rolling_std_7": rs7,
+            "rolling_mean_28": rm28,
+            "rolling_std_28": rs28,
+            "days_since_start": (ts - self.origin).days,
+            "series_id": f"{ct} | {seg}",
+        }

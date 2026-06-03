@@ -10,9 +10,12 @@ import pytest
 
 from compute_forecasting.features import (
     FEATURE_COLUMNS,
+    RecursiveFeatureBuilder,
     add_calendar_features,
     add_lag_features,
+    apply_conformal_calibration,
     build_features,
+    compute_conformal_adjustments,
     compute_residual_ratios,
     fit_series_trends,
     get_feature_columns,
@@ -45,7 +48,7 @@ def sample_data() -> pd.DataFrame:
         "date": dates,
         "compute_type": ["GPU Training"] * 400,
         "customer_segment": ["Enterprise"] * 400,
-        "compute_hours": np.random.uniform(1000, 5000, 400),
+        "compute_hours": np.random.default_rng(42).uniform(1000, 5000, 400),
     })
 
 
@@ -236,3 +239,142 @@ def test_predict_with_trend_vectorization(sample_data):
 
     assert len(predictions) == len(sample_data)
     assert not np.isnan(predictions).any(), "Predictions should not contain NaN"
+
+
+# ---------------------------------------------------------------------------
+# Conformal Calibration Tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def conformal_data():
+    """Create synthetic validation data for conformal calibration tests."""
+    rng = np.random.default_rng(42)
+    n = 200
+    df = pd.DataFrame({
+        "compute_type": (["GPU Training"] * 100) + (["CPU Batch"] * 100),
+    })
+    y_val = rng.uniform(500, 5000, n)
+    # P50 close to actuals, P10/P90 as symmetric bands
+    p50 = y_val + rng.normal(0, 100, n)
+    p10 = p50 - rng.uniform(200, 400, n)
+    p90 = p50 + rng.uniform(200, 400, n)
+    return df, p10, p50, p90, y_val
+
+
+def test_conformal_adjustments_are_finite(conformal_data):
+    """Conformal adjustments should be finite real numbers."""
+    df, p10, p50, p90, y_val = conformal_data
+    adjustments = compute_conformal_adjustments(df, p10, p50, p90, y_val)
+
+    for ctype, adj in adjustments.items():
+        assert np.isfinite(adj), f"Adjustment for {ctype} should be finite, got {adj}"
+
+
+def test_conformal_adjustments_per_type(conformal_data):
+    """Should return one adjustment per compute type."""
+    df, p10, p50, p90, y_val = conformal_data
+    adjustments = compute_conformal_adjustments(df, p10, p50, p90, y_val)
+
+    expected_types = set(df["compute_type"].unique())
+    assert set(adjustments.keys()) == expected_types, (
+        f"Expected adjustments for {expected_types}, got {set(adjustments.keys())}"
+    )
+
+
+def test_calibrated_intervals_change_symmetrically(conformal_data):
+    """Calibrated intervals should widen/narrow symmetrically around the raw bands."""
+    df, p10, p50, p90, y_val = conformal_data
+    adjustments = compute_conformal_adjustments(df, p10, p50, p90, y_val)
+    cal_p10, cal_p90 = apply_conformal_calibration(df, p10, p50, p90, adjustments)
+
+    # For each type, the P10 shift and P90 shift should be equal magnitude
+    for ctype in df["compute_type"].unique():
+        mask = (df["compute_type"] == ctype).values
+        p10_shift = p10[mask] - cal_p10[mask]  # positive = P10 moved down (wider)
+        p90_shift = cal_p90[mask] - p90[mask]  # positive = P90 moved up (wider)
+        np.testing.assert_allclose(
+            p10_shift, p90_shift, rtol=1e-10,
+            err_msg=f"Adjustments for {ctype} should be symmetric"
+        )
+
+
+def test_conformal_coverage_meets_target():
+    """On a well-behaved dataset, calibrated coverage should meet the target."""
+    rng = np.random.default_rng(123)
+    n = 500
+    df = pd.DataFrame({"compute_type": ["GPU Training"] * n})
+
+    # Generate data where actuals follow predictions closely
+    y_val = rng.uniform(1000, 10000, n)
+    noise = rng.normal(0, 200, n)
+    p50 = y_val + noise
+    p10 = p50 - 500
+    p90 = p50 + 500
+
+    target = 0.80
+    adjustments = compute_conformal_adjustments(
+        df, p10, p50, p90, y_val, target_coverage=target
+    )
+    cal_p10, cal_p90 = apply_conformal_calibration(df, p10, p50, p90, adjustments)
+
+    # Check coverage on the same validation set (should be >= target)
+    covered = ((y_val >= cal_p10) & (y_val <= cal_p90)).mean()
+    assert covered >= target - 0.02, (
+        f"Calibrated coverage {covered:.1%} should be near target {target:.0%}"
+    )
+
+
+def test_conformal_with_single_observation():
+    """Conformal calibration should handle a type with very few observations."""
+    df = pd.DataFrame({"compute_type": ["GPU Training"] * 3})
+    y_val = np.array([100.0, 200.0, 300.0])
+    p10 = np.array([80.0, 180.0, 280.0])
+    p50 = np.array([100.0, 200.0, 300.0])
+    p90 = np.array([120.0, 220.0, 320.0])
+
+    # Should not crash with very small sample
+    adjustments = compute_conformal_adjustments(df, p10, p50, p90, y_val)
+    assert "GPU Training" in adjustments
+    assert np.isfinite(adjustments["GPU Training"])
+
+
+# ---------------------------------------------------------------------------
+# RecursiveFeatureBuilder Tests
+# ---------------------------------------------------------------------------
+
+
+def test_recursive_builder_feature_alignment(usage_data, holidays_data):
+    """Verify RecursiveFeatureBuilder.build_row produces the same features as build_features."""
+    builder = RecursiveFeatureBuilder(usage_data, holidays_data)
+
+    # Pick a date in the middle of the dataset
+    test_date = pd.Timestamp("2024-06-15")
+    ct, seg = "GPU Training", "Enterprise"
+
+    row_features = builder.build_row(test_date, ct, seg)
+
+    # Compare to build_features output for the same row
+    df = build_features(usage_data, holidays_data)
+    batch_row = df[
+        (df["date"] == test_date) &
+        (df["compute_type"] == ct) &
+        (df["customer_segment"] == seg)
+    ].iloc[0]
+
+    # Check all FEATURE_COLUMNS match
+    mismatches = []
+    for col in FEATURE_COLUMNS:
+        if col in ("compute_type", "customer_segment", "series_id"):
+            # Categorical columns: compare string values
+            if str(row_features[col]) != str(batch_row[col]):
+                mismatches.append(f"{col}: {row_features[col]} vs {batch_row[col]}")
+        else:
+            rv = row_features[col]
+            bv = batch_row[col]
+            if pd.isna(rv) and pd.isna(bv):
+                continue
+            if not np.isclose(rv, bv, rtol=1e-6):
+                mismatches.append(f"{col}: {rv} vs {bv}")
+
+    assert not mismatches, f"Feature mismatches: {mismatches}"

@@ -20,6 +20,7 @@ from sklearn.metrics import mean_absolute_percentage_error
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 from compute_forecasting.features import (
+    RecursiveFeatureBuilder,
     build_features,
     get_feature_columns,
     fit_series_trends,
@@ -104,74 +105,9 @@ print("\n3. Running recursive forecast over test period (Jan-Jun 2026)...")
 COMPUTE_TYPES = sorted(usage["compute_type"].unique())
 SEGMENTS = sorted(usage["customer_segment"].unique())
 
-# Historical lookup for lag values
-hist_lookup = usage.set_index(["date", "compute_type", "customer_segment"])["compute_hours"].to_dict()
-pred_cache = {}  # (date, ct, seg) -> predicted P50
-
-# Holiday lookup
-holiday_dates_set = set(holidays["date"].dt.date)
-holiday_arr = np.array(sorted([pd.Timestamp(d) for d in holidays["date"].dt.date.unique()]))
-origin = usage["date"].min()
-
-
-def get_value(dt, ct, seg):
-    key = (dt, ct, seg)
-    if key in hist_lookup:
-        return hist_lookup[key]
-    return pred_cache.get(key, np.nan)
-
-
-def build_row_features(dt, ct, seg):
-    ts = pd.Timestamp(dt) if not isinstance(dt, pd.Timestamp) else dt
-    d = ts.date() if hasattr(ts, "date") else ts
-
-    qstart = ts.to_period("Q").start_time
-    qend = ts.to_period("Q").end_time.date()
-    days_to_qe = (pd.Timestamp(qend) - ts).days
-
-    future_h = holiday_arr[holiday_arr >= ts]
-    past_h = holiday_arr[holiday_arr <= ts]
-    dtn = int((future_h[0] - ts).days) if len(future_h) > 0 else 30
-    dfl = int((ts - past_h[-1]).days) if len(past_h) > 0 else 30
-
-    lag_vals = {}
-    for lag in [1, 7, 14, 28, 365]:
-        lag_date = ts - pd.Timedelta(days=lag)
-        lag_vals[f"lag_{lag}"] = get_value(lag_date, ct, seg)
-
-    recent_vals = []
-    for offset in range(1, 8):
-        v = get_value(ts - pd.Timedelta(days=offset), ct, seg)
-        if not np.isnan(v):
-            recent_vals.append(v)
-    rm7 = np.mean(recent_vals) if recent_vals else np.nan
-    rs7 = np.std(recent_vals) if len(recent_vals) > 1 else np.nan
-
-    recent_28 = []
-    for offset in range(1, 29):
-        v = get_value(ts - pd.Timedelta(days=offset), ct, seg)
-        if not np.isnan(v):
-            recent_28.append(v)
-    rm28 = np.mean(recent_28) if recent_28 else np.nan
-    rs28 = np.std(recent_28) if len(recent_28) > 1 else np.nan
-
-    return {
-        "compute_type": ct, "customer_segment": seg,
-        "day_of_week": ts.dayofweek, "month": ts.month,
-        "day_of_month": ts.day, "week_of_year": ts.isocalendar()[1],
-        "is_weekend": int(ts.dayofweek >= 5), "quarter": ts.quarter,
-        "day_of_year": ts.dayofyear,
-        "day_of_quarter": (ts - qstart).days + 1,
-        "is_quarter_end": int(days_to_qe <= 10),
-        "is_holiday": int(d in holiday_dates_set),
-        "days_to_next_holiday": min(dtn, 30),
-        "days_from_last_holiday": min(dfl, 30),
-        **lag_vals,
-        "rolling_mean_7": rm7, "rolling_std_7": rs7,
-        "rolling_mean_28": rm28, "rolling_std_28": rs28,
-        "days_since_start": (ts - origin).days,
-        "series_id": f"{ct} | {seg}",
-    }
+# Feature builder with ONLY training data — lag lookups for test-period dates
+# fall through to the prediction cache, making this truly recursive.
+builder = RecursiveFeatureBuilder(usage[usage["date"] <= TRAIN_END], holidays)
 
 
 test_dates = pd.date_range(TEST_START, TEST_END, freq="D")
@@ -181,7 +117,7 @@ for i, dt in enumerate(test_dates):
     day_rows = []
     for ct in COMPUTE_TYPES:
         for seg in SEGMENTS:
-            feat = build_row_features(dt, ct, seg)
+            feat = builder.build_row(dt, ct, seg)
             day_rows.append(feat)
 
     day_df = pd.DataFrame(day_rows)
@@ -203,7 +139,7 @@ for i, dt in enumerate(test_dates):
 
     # Cache P50 for next day's lag features
     for idx, row in day_df.iterrows():
-        pred_cache[(dt, row["compute_type"], row["customer_segment"])] = row["recursive_P50"]
+        builder.cache_prediction(dt, row["compute_type"], row["customer_segment"], row["recursive_P50"])
 
     day_df["date"] = dt
     all_recursive_rows.append(day_df[["date", "compute_type", "customer_segment", "recursive_P50"]])
