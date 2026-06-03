@@ -27,19 +27,20 @@ AI compute providers face a planning paradox: GPU procurement lead times are 3-6
 
 **Hybrid trend + residual decomposition** separates per-series exponential growth from cyclical patterns, solving the tree-model extrapolation problem for fast-growing series. A global LightGBM model trained on all 16 series simultaneously learns shared patterns (weekly cycles, holiday effects) while categorical features capture series-specific volatility.
 
-**Why gradient boosting over ARIMA/Prophet:** Handles 16 related series in a single fit, natively supports categorical features, and produces quantile forecasts (P10/P50/P90) without distributional assumptions.
+**Why gradient boosting over ARIMA/Prophet:** Empirically validated — on aggregated daily totals (a deliberately favorable setup for single-series methods), LightGBM Hybrid achieves 2.4% MAPE vs. Prophet at 10.7% and SARIMAX at 28.9%. The global model handles 16 related series in a single fit, natively supports categorical features, and produces quantile forecasts (P10/P50/P90) without distributional assumptions.
 
 ### Pipeline
 
 ```
-EDA (51 cells)              Forecasting (50 cells)         Scenario Planning
+EDA (51 cells)              Forecasting (71 cells)         Scenario Planning
 --------------------        ----------------------         -----------------
 Trend decomposition         25-feature engineering         60-day daily forecast
 ACF/PACF + stationarity     Hybrid trend+residual model    3-6 month envelopes
 Event impact analysis       LightGBM quantile regression   Base/High/Low scenarios
 Outlier quantification      Conformal calibration (CQR)    Capacity threshold charts
-Correlation structure       Walk-forward backtesting
-                            Recursive forecast validation
+Correlation structure       Walk-forward backtesting        Shortfall magnitude analysis
+                            Recursive forecast validation   Cost-of-inaction framing
+                            Prophet/SARIMAX comparison
                             SHAP interpretability
 ```
 
@@ -94,8 +95,8 @@ In production, this model would need drift detection to trigger retraining:
 compute-forecasting/
 ├── notebooks/
 │   ├── 01_eda.ipynb                    # Exploratory analysis (51 cells)
-│   ├── 02_forecasting.ipynb            # LightGBM model + evaluation (67 cells)
-│   └── 03_scenarios.ipynb              # Scenario planning + capacity analysis (32 cells)
+│   ├── 02_forecasting.ipynb            # LightGBM model + Prophet/SARIMAX comparison (71 cells)
+│   └── 03_scenarios.ipynb              # Scenario planning + shortfall analysis (33 cells)
 ├── src/compute_forecasting/
 │   └── features.py                     # Feature engineering + hybrid model support
 ├── data/
@@ -116,4 +117,4 @@ jupyter notebook notebooks/01_eda.ipynb   # run notebooks in order
 
 ## Tech Stack
 
-Python 3.11 | LightGBM | pandas | scikit-learn | SHAP | statsmodels | matplotlib/seaborn
+Python 3.11 | LightGBM | pandas | scikit-learn | SHAP | Prophet | statsmodels | matplotlib/seaborn
