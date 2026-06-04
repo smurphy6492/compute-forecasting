@@ -585,7 +585,7 @@ class RecursiveFeatureBuilder:
             "day_of_week": ts.dayofweek,
             "month": ts.month,
             "day_of_month": ts.day,
-            "week_of_year": ts.isocalendar()[1],
+            "week_of_year": ts.isocalendar().week,
             "is_weekend": int(ts.dayofweek >= 5),
             "quarter": ts.quarter,
             "day_of_year": ts.dayofyear,

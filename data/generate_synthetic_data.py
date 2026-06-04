@@ -137,16 +137,10 @@ def _get_us_holidays(year: int) -> list[tuple[date, str]]:
     holidays.append((date(year, 1, 1), "New Year's Day"))
 
     # MLK Day — 3rd Monday of January
-    jan1 = date(year, 1, 1)
-    first_monday = jan1 + timedelta(days=(7 - jan1.weekday()) % 7)
-    if first_monday.month != 1:
-        first_monday = date(year, 1, 1) + timedelta(days=(0 - jan1.weekday()) % 7)
-    mlk = date(year, 1, 1)
-    # Find first Monday in Jan
     d = date(year, 1, 1)
     while d.weekday() != 0:
         d += timedelta(days=1)
-    mlk = d + timedelta(weeks=2)  # 3rd Monday
+    mlk = d + timedelta(weeks=2)
     holidays.append((mlk, "MLK Day"))
 
     # Presidents' Day — 3rd Monday of February
