@@ -65,7 +65,7 @@ Correlation structure       Walk-forward backtesting        Shortfall magnitude 
 - **Synthetic data** -- the model is validated on data I designed, not production telemetry. Real compute usage has messier patterns, missing data, and distribution drift that would likely degrade performance. The methodology is the point, not the specific numbers.
 - **Startup series remain noisy** -- coverage is 73% for Startup segment due to inherent demand volatility. Enterprise and Mid-Market exceed 85%.
 - **Hyperparameters not tuned** -- sensible defaults, not optimized via grid search.
-- **Recursive forecast validated** -- single-step MAPE (7.94%) matches recursive 6-month MAPE (7.95%), confirming the hybrid decomposition produces stable recursive forecasts.
+- **Recursive forecast validated** -- single-step MAPE (7.94%) matches recursive 6-month MAPE (7.96%), confirming the hybrid decomposition produces stable recursive forecasts.
 
 ## Production Considerations
 
