@@ -34,7 +34,7 @@ AI compute providers face a planning paradox: GPU procurement lead times are 3-6
 ### Pipeline
 
 ```
-EDA (51 cells)              Forecasting (71 cells)         Scenario Planning
+EDA (51 cells)              Forecasting (72 cells)         Scenario Planning
 --------------------        ----------------------         -----------------
 Trend decomposition         25-feature engineering         60-day daily forecast
 ACF/PACF + stationarity     Hybrid trend+residual model    3-6 month envelopes
@@ -97,8 +97,8 @@ In production, this model would need drift detection to trigger retraining:
 compute-forecasting/
 ├── notebooks/
 │   ├── 01_eda.ipynb                    # Exploratory analysis (51 cells)
-│   ├── 02_forecasting.ipynb            # LightGBM model + Prophet/SARIMAX comparison (71 cells)
-│   └── 03_scenarios.ipynb              # Scenario planning + shortfall analysis (33 cells)
+│   ├── 02_forecasting.ipynb            # LightGBM model + Prophet/SARIMAX comparison (72 cells)
+│   └── 03_scenarios.ipynb              # Scenario planning + shortfall analysis (32 cells)
 ├── src/compute_forecasting/
 │   └── features.py                     # Feature engineering + hybrid model support
 ├── data/
