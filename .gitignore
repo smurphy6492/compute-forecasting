@@ -15,3 +15,6 @@ venv/
 # Internal build notes (keep local, not published)
 SESSION_GUIDE.md
 PLAN.md
+
+# Generated HTML reports (not part of published deliverables)
+outputs/*.html
