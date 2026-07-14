@@ -105,9 +105,12 @@ print("\n3. Running recursive forecast over test period (Jan-Jun 2026)...")
 COMPUTE_TYPES = sorted(usage["compute_type"].unique())
 SEGMENTS = sorted(usage["customer_segment"].unique())
 
-# Feature builder with ONLY training data — lag lookups for test-period dates
-# fall through to the prediction cache, making this truly recursive.
-builder = RecursiveFeatureBuilder(usage[usage["date"] <= TRAIN_END], holidays)
+# Feature builder with actuals through the forecast origin (train + val,
+# i.e. everything known on Dec 31 2025). Test-period lag lookups fall through
+# to the prediction cache, so the Jan-Jun 2026 forecast is truly recursive.
+# History must extend to the origin: cutting it at TRAIN_END would leave a
+# Jul-Dec 2025 blackout where lags are neither actuals nor cached predictions.
+builder = RecursiveFeatureBuilder(usage[usage["date"] <= VAL_END], holidays)
 
 
 test_dates = pd.date_range(TEST_START, TEST_END, freq="D")
