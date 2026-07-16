@@ -27,6 +27,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+production = [
+    "mlflow>=3.0",
+]
 dev = [
     "ruff>=0.4",
     "mypy>=1.10",
