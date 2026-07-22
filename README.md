@@ -17,9 +17,9 @@ AI compute providers face a planning paradox: GPU procurement lead times are 3-6
 
 | Metric | Result |
 |--------|--------|
-| **Test MAPE** | 7.94% (vs. 10.5% growth-adjusted seasonal naive) |
-| **Backtesting** | Consistent across 3 walk-forward folds (7.1%-13.2%) |
-| **Coverage (P10-P90)** | 83.8% overall (GPU Training 80.7%, GPU Inference 82.3%) |
+| **Test MAPE** | 7.65% (vs. 10.5% growth-adjusted seasonal naive) |
+| **Backtesting** | Consistent across 3 walk-forward folds (7.9%-12.8%) |
+| **Coverage (P10-P90)** | 83.3% overall (GPU Training 79.7%, GPU Inference 83.1%) |
 | **Top predictors** | Yesterday's value, weekly lags, rolling averages, trend |
 
 ![Forecast vs Actual](outputs/figures/forecast_vs_actual.png)
@@ -29,7 +29,17 @@ AI compute providers face a planning paradox: GPU procurement lead times are 3-6
 
 **Hybrid trend + residual decomposition** separates per-series exponential growth from cyclical patterns, solving the tree-model extrapolation problem for fast-growing series. A global LightGBM model trained on all 16 series simultaneously learns shared patterns (weekly cycles, holiday effects) while categorical features capture series-specific volatility.
 
-**Why gradient boosting over ARIMA/Prophet:** On aggregated daily totals, LightGBM Hybrid achieves 2.4% MAPE vs. Prophet at 10.7% and SARIMAX at 28.9%. This comparison is illustrative, not apples-to-apples — LightGBM benefits from disaggregated 16-series training data while Prophet/SARIMAX run on the single aggregated series. The structural advantages are real though: a global model handles all 16 series in a single fit, natively supports categorical features, and produces quantile forecasts (P10/P50/P90) without distributional assumptions.
+**Why gradient boosting over ARIMA/Prophet:** On aggregated daily totals, LightGBM Hybrid achieves 2.5% MAPE vs. Prophet at 10.7% and SARIMAX at 28.9%. This comparison is illustrative, not apples-to-apples — LightGBM benefits from disaggregated 16-series training data while Prophet/SARIMAX run on the single aggregated series. The structural advantages are real though: a global model handles all 16 series in a single fit, natively supports categorical features, and produces quantile forecasts (P10/P50/P90) without distributional assumptions.
+
+### Growth cap sensitivity
+
+The exponential trend's growth rate is capped to stop a steep two-year fit from extrapolating to implausible demand a year out.
+The cap value was chosen by sweeping candidates from 4%/month to uncapped, selecting on the validation window, and reporting on the held-out test set (`scripts/cap_sensitivity_sweep.py`).
+
+At the original 5%/month, the cap clipped the one genuinely fast series, GPU Inference | Startup, whose trend fits about 5.9%/month.
+Raising the cap to 6% removed that clip and cut the series from 16.1% to 10.3% test MAPE, which moved overall test MAPE from 7.94% to 7.65%.
+6% is the tightest cap that constrains no series' real growth, so it keeps the guard rail at no accuracy cost: tightening to 4% is worse (9.0% overall), and loosening past 6% changes nothing because no series fits faster.
+On production data, where the true growth ceiling is unknown, the same sweep would run on a validation split, or the hard cap would be replaced by a per-type cap or a damped trend.
 
 ### Pipeline
 
@@ -65,7 +75,7 @@ Correlation structure       Walk-forward backtesting        Shortfall magnitude 
 - **Synthetic data** -- the model is validated on data I designed, not production telemetry. Real compute usage has messier patterns, missing data, and distribution drift that would likely degrade performance. The methodology is the point, not the specific numbers.
 - **Startup series remain noisy** -- coverage is 73% for Startup segment due to inherent demand volatility. Enterprise and Mid-Market exceed 85%.
 - **Hyperparameters not tuned** -- sensible defaults, not optimized via grid search.
-- **Recursive forecast validated** -- single-step MAPE (7.94%) matches recursive 6-month MAPE (7.93%), confirming the hybrid decomposition produces stable recursive forecasts.
+- **Recursive forecast validated** -- single-step MAPE (7.63%) matches recursive 6-month MAPE (7.65%), confirming the hybrid decomposition produces stable recursive forecasts.
 
 ## Production Considerations
 
