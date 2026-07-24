@@ -39,6 +39,7 @@ The cap value was chosen by sweeping candidates from 4%/month to uncapped, selec
 At the original 5%/month, the cap clipped the one genuinely fast series, GPU Inference | Startup, whose trend fits about 5.9%/month.
 Raising the cap to 6% removed that clip and cut the series from 16.1% to 10.3% test MAPE, which moved overall test MAPE from 7.94% to 7.65%.
 6% is the tightest cap that constrains no series' real growth, so it keeps the guard rail at no accuracy cost: tightening to 4% is worse (9.0% overall), and loosening past 6% changes nothing because no series fits faster.
+The result also holds in the recursive regime the model actually deploys in (`scripts/cap_sensitivity_recursive.py`): re-running the sweep with predictions fed back as lags, overall MAPE degrades under 0.1pp at every cap, and the cap penalty on the clipped series stays about the same (5.1pp recursive vs 5.8pp single-step) rather than compounding — the trend/residual split, not lag-chasing, is doing the extrapolation.
 On production data, where the true growth ceiling is unknown, the same sweep would run on a validation split, or the hard cap would be replaced by a per-type cap or a damped trend.
 
 ### Pipeline
