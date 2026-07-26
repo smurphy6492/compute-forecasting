@@ -7,6 +7,7 @@ Compares recursive MAPE to single-step MAPE at various horizons.
 This answers: "How much does accuracy degrade when we feed predictions back
 as lag features instead of using actual values?"
 """
+
 from __future__ import annotations
 
 import sys
@@ -22,9 +23,9 @@ sys.path.insert(0, str(ROOT / "src"))
 from compute_forecasting.features import (
     RecursiveFeatureBuilder,
     build_features,
-    get_feature_columns,
-    fit_series_trends,
     compute_residual_ratios,
+    fit_series_trends,
+    get_feature_columns,
     predict_with_trend,
 )
 
@@ -49,10 +50,19 @@ val = df[(df["date"] > TRAIN_END) & (df["date"] <= VAL_END)].copy()
 test = df[df["date"] > VAL_END].copy()
 
 PARAMS = {
-    "objective": "quantile", "alpha": 0.5, "metric": "quantile",
-    "learning_rate": 0.05, "num_leaves": 63, "min_child_samples": 50,
-    "subsample": 0.8, "colsample_bytree": 0.8, "reg_alpha": 0.1,
-    "reg_lambda": 1.0, "n_estimators": 2000, "random_state": 42, "verbose": -1,
+    "objective": "quantile",
+    "alpha": 0.5,
+    "metric": "quantile",
+    "learning_rate": 0.05,
+    "num_leaves": 63,
+    "min_child_samples": 50,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "reg_alpha": 0.1,
+    "reg_lambda": 1.0,
+    "n_estimators": 2000,
+    "random_state": 42,
+    "verbose": -1,
 }
 
 # ---------------------------------------------------------------------------
@@ -80,10 +90,13 @@ for alpha, label in [(0.1, "P10"), (0.5, "P50"), (0.9, "P90")]:
     p["alpha"] = alpha
     m = lgb.LGBMRegressor(**p)
     m.fit(
-        X_train, y_train_log_resid,
+        X_train,
+        y_train_log_resid,
         eval_set=[(X_val, y_val_log_resid)],
-        callbacks=[lgb.early_stopping(stopping_rounds=50, verbose=False),
-                   lgb.log_evaluation(period=0)],
+        callbacks=[
+            lgb.early_stopping(stopping_rounds=50, verbose=False),
+            lgb.log_evaluation(period=0),
+        ],
         categorical_feature=CAT_FEATURES,
     )
     models[label] = m
@@ -131,18 +144,22 @@ for i, dt in enumerate(test_dates):
     ).astype("category")
 
     # Trend values for reconstruction
-    trend_vals = np.array([
-        trends[(row["compute_type"], row["customer_segment"])].predict(pd.Series([dt]))[0]
-        for _, row in day_df.iterrows()
-    ])
+    trend_vals = np.array(
+        [
+            trends[(row["compute_type"], row["customer_segment"])].predict(pd.Series([dt]))[0]
+            for _, row in day_df.iterrows()
+        ]
+    )
 
     # Predict log(residual_ratio) and reconstruct
     log_resid_preds = models["P50"].predict(day_df[feature_cols])
     day_df["recursive_P50"] = np.maximum(trend_vals * np.exp(log_resid_preds), 0)
 
     # Cache P50 for next day's lag features
-    for idx, row in day_df.iterrows():
-        builder.cache_prediction(dt, row["compute_type"], row["customer_segment"], row["recursive_P50"])
+    for _, row in day_df.iterrows():
+        builder.cache_prediction(
+            dt, row["compute_type"], row["customer_segment"], row["recursive_P50"]
+        )
 
     day_df["date"] = dt
     all_recursive_rows.append(day_df[["date", "compute_type", "customer_segment", "recursive_P50"]])
@@ -159,31 +176,43 @@ print(f"  Done: {len(rc):,} rows")
 print("\n4. Comparing single-step vs recursive accuracy...")
 
 # Merge actuals
-actuals = usage[usage["date"] >= TEST_START][["date", "compute_type", "customer_segment", "compute_hours"]]
+actuals = usage[usage["date"] >= TEST_START][
+    ["date", "compute_type", "customer_segment", "compute_hours"]
+]
 rc = rc.merge(actuals, on=["date", "compute_type", "customer_segment"], how="left")
 
 # Overall MAPE
 rc_mape = mean_absolute_percentage_error(rc["compute_hours"], rc["recursive_P50"]) * 100
 print(f"\n  {'Metric':<35} {'Single-step':>12} {'Recursive':>12}")
-print(f"  {'-'*60}")
+print(f"  {'-' * 60}")
 print(f"  {'Overall MAPE':<35} {ss_mape:>11.2f}% {rc_mape:>11.2f}%")
 
 # By compute type
-print(f"\n  MAPE by Compute Type:")
+print("\n  MAPE by Compute Type:")
 for ct in COMPUTE_TYPES:
     mask_ss = (test["compute_type"] == ct).values
     mask_rc = rc["compute_type"] == ct
     ss_ct = mean_absolute_percentage_error(y_test.values[mask_ss], ss_p50[mask_ss]) * 100
-    rc_ct = mean_absolute_percentage_error(rc.loc[mask_rc, "compute_hours"], rc.loc[mask_rc, "recursive_P50"]) * 100
+    rc_ct = (
+        mean_absolute_percentage_error(
+            rc.loc[mask_rc, "compute_hours"], rc.loc[mask_rc, "recursive_P50"]
+        )
+        * 100
+    )
     print(f"    {ct:<25} {ss_ct:>11.2f}% {rc_ct:>11.2f}%")
 
 # By segment
-print(f"\n  MAPE by Customer Segment:")
+print("\n  MAPE by Customer Segment:")
 for seg in SEGMENTS:
     mask_ss = (test["customer_segment"] == seg).values
     mask_rc = rc["customer_segment"] == seg
     ss_seg = mean_absolute_percentage_error(y_test.values[mask_ss], ss_p50[mask_ss]) * 100
-    rc_seg = mean_absolute_percentage_error(rc.loc[mask_rc, "compute_hours"], rc.loc[mask_rc, "recursive_P50"]) * 100
+    rc_seg = (
+        mean_absolute_percentage_error(
+            rc.loc[mask_rc, "compute_hours"], rc.loc[mask_rc, "recursive_P50"]
+        )
+        * 100
+    )
     print(f"    {seg:<25} {ss_seg:>11.2f}% {rc_seg:>11.2f}%")
 
 # ---------------------------------------------------------------------------
@@ -205,14 +234,15 @@ horizon_bins = [
 ]
 
 print(f"\n  {'Horizon':<20} {'Recursive MAPE':>15} {'Rows':>8}")
-print(f"  {'-'*45}")
+print(f"  {'-' * 45}")
 for label, lo, hi in horizon_bins:
     mask = (rc["days_out"] >= lo) & (rc["days_out"] < hi)
     if mask.sum() == 0:
         continue
-    horizon_mape = mean_absolute_percentage_error(
-        rc.loc[mask, "compute_hours"], rc.loc[mask, "recursive_P50"]
-    ) * 100
+    horizon_mape = (
+        mean_absolute_percentage_error(rc.loc[mask, "compute_hours"], rc.loc[mask, "recursive_P50"])
+        * 100
+    )
     print(f"  {label:<20} {horizon_mape:>14.2f}% {mask.sum():>8,}")
 
 # ---------------------------------------------------------------------------
@@ -223,24 +253,42 @@ print("\n6. First forecast day analysis (the 87% drop question):")
 last_actual_date = usage["date"].max()
 first_forecast_date = TEST_START
 
-last_actual_total = usage[usage["date"] == last_actual_date].groupby("date")["compute_hours"].sum().iloc[0]
+last_actual_total = (
+    usage[usage["date"] == last_actual_date].groupby("date")["compute_hours"].sum().iloc[0]
+)
 first_recursive = rc[rc["date"] == first_forecast_date]["recursive_P50"].sum()
 first_actual = rc[rc["date"] == first_forecast_date]["compute_hours"].sum()
 
 print(f"  Last training day ({last_actual_date.date()}, {last_actual_date.day_name()}):")
 print(f"    Actual total: {last_actual_total:,.0f}")
 print(f"  First test day ({first_forecast_date.date()}, {first_forecast_date.day_name()}):")
-print(f"    Actual total:    {first_actual:,.0f} ({first_actual/last_actual_total:.0%} of prior day)")
-print(f"    Recursive P50:   {first_recursive:,.0f} ({first_recursive/last_actual_total:.0%} of prior day)")
-print(f"    Recursive error: {abs(first_recursive - first_actual)/first_actual:.1%}")
+print(
+    f"    Actual total:    {first_actual:,.0f} ({first_actual / last_actual_total:.0%} of prior day)"
+)
+print(
+    f"    Recursive P50:   {first_recursive:,.0f} ({first_recursive / last_actual_total:.0%} of prior day)"
+)
+print(f"    Recursive error: {abs(first_recursive - first_actual) / first_actual:.1%}")
 
 # Check: is the drop just calendar effects?
 # Compare to the same transition a year earlier
-prev_year_last = usage[usage["date"] == pd.Timestamp("2025-06-30")].groupby("date")["compute_hours"].sum().iloc[0]
-prev_year_first = usage[usage["date"] == pd.Timestamp("2025-07-01")].groupby("date")["compute_hours"].sum().iloc[0]
-print(f"\n  Same transition one year earlier (2025):")
+prev_year_last = (
+    usage[usage["date"] == pd.Timestamp("2025-06-30")]
+    .groupby("date")["compute_hours"]
+    .sum()
+    .iloc[0]
+)
+prev_year_first = (
+    usage[usage["date"] == pd.Timestamp("2025-07-01")]
+    .groupby("date")["compute_hours"]
+    .sum()
+    .iloc[0]
+)
+print("\n  Same transition one year earlier (2025):")
 print(f"    Jun 30 actual: {prev_year_last:,.0f}")
-print(f"    Jul 1 actual:  {prev_year_first:,.0f} ({prev_year_first/prev_year_last:.0%} of prior day)")
+print(
+    f"    Jul 1 actual:  {prev_year_first:,.0f} ({prev_year_first / prev_year_last:.0%} of prior day)"
+)
 
 # Worst series by recursive MAPE
 print("\n7. Top 5 worst series (recursive MAPE):")

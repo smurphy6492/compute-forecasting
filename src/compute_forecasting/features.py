@@ -7,9 +7,10 @@ Designed for a global LightGBM model across all (compute_type, customer_segment)
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import cast
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 from numpy.polynomial.polynomial import polyfit
 
 
@@ -119,10 +120,10 @@ def add_rolling_features(
     for w in windows:
         shifted = df.groupby(group_cols)[target_col].shift(1)
         df[f"rolling_mean_{w}"] = shifted.groupby(df[group_cols].apply(tuple, axis=1)).transform(
-            lambda s: s.rolling(w, min_periods=1).mean()
+            lambda s, w=w: s.rolling(w, min_periods=1).mean()
         )
         df[f"rolling_std_{w}"] = shifted.groupby(df[group_cols].apply(tuple, axis=1)).transform(
-            lambda s: s.rolling(w, min_periods=1).std()
+            lambda s, w=w: s.rolling(w, min_periods=1).std()
         )
 
     return df
@@ -135,10 +136,7 @@ def add_trend_feature(
 ) -> pd.DataFrame:
     """Add a linear trend proxy (days since the start of the dataset)."""
     df = df.copy()
-    if origin is None:
-        origin_date = df[date_col].min()
-    else:
-        origin_date = pd.Timestamp(origin)
+    origin_date = df[date_col].min() if origin is None else pd.Timestamp(origin)
     df["days_since_start"] = (df[date_col] - origin_date).dt.days
     return df
 
@@ -208,16 +206,34 @@ def build_features(
 # the build_row_features() function in notebooks/03_scenarios.ipynb.
 FEATURE_COLUMNS = [
     # Categoricals
-    "compute_type", "customer_segment", "series_id",
+    "compute_type",
+    "customer_segment",
+    "series_id",
     # Calendar
-    "day_of_week", "month", "day_of_month", "week_of_year",
-    "is_weekend", "quarter", "day_of_year", "day_of_quarter", "is_quarter_end",
+    "day_of_week",
+    "month",
+    "day_of_month",
+    "week_of_year",
+    "is_weekend",
+    "quarter",
+    "day_of_year",
+    "day_of_quarter",
+    "is_quarter_end",
     # Holiday
-    "is_holiday", "days_to_next_holiday", "days_from_last_holiday",
+    "is_holiday",
+    "days_to_next_holiday",
+    "days_from_last_holiday",
     # Lags
-    "lag_1", "lag_7", "lag_14", "lag_28", "lag_365",
+    "lag_1",
+    "lag_7",
+    "lag_14",
+    "lag_28",
+    "lag_365",
     # Rolling
-    "rolling_mean_7", "rolling_std_7", "rolling_mean_28", "rolling_std_28",
+    "rolling_mean_7",
+    "rolling_std_7",
+    "rolling_mean_28",
+    "rolling_std_28",
     # Trend
     "days_since_start",
 ]
@@ -256,7 +272,8 @@ class SeriesTrend:
         """Extrapolate the trend to arbitrary dates."""
         delta = pd.to_datetime(dates) - self.origin_date
         # .dt.days for Series, .days for DatetimeIndex/TimedeltaIndex
-        t = delta.dt.days.values if hasattr(delta, "dt") else delta.days.values
+        t_days = delta.dt.days.values if hasattr(delta, "dt") else delta.days.values
+        t = np.asarray(t_days, dtype=float)
         return np.exp(self.log_intercept + self.daily_growth_rate * t)
 
 
@@ -289,12 +306,11 @@ def fit_series_trends(
     origin_date = df[date_col].min()
     trends: dict[tuple[str, ...], SeriesTrend] = {}
 
-    for key, grp in df.groupby(group_cols, observed=True):
-        if not isinstance(key, tuple):
-            key = (key,)
+    for raw_key, grp in df.groupby(group_cols, observed=True):
+        key = cast("tuple[str, str]", raw_key if isinstance(raw_key, tuple) else (raw_key,))
 
-        t = (grp[date_col] - origin_date).dt.days.values.astype(float)
-        y = grp[target_col].values.astype(float)
+        t = np.asarray((grp[date_col] - origin_date).dt.days.to_numpy(), dtype=float)
+        y = grp[target_col].to_numpy(dtype=float)
 
         # Filter out zeros/negatives for log transform
         valid = y > 0
@@ -332,12 +348,11 @@ def compute_residual_ratios(
 
     ratios = pd.Series(np.nan, index=df.index, dtype=float)
 
-    for key, grp in df.groupby(group_cols, observed=True):
-        if not isinstance(key, tuple):
-            key = (key,)
+    for raw_key, grp in df.groupby(group_cols, observed=True):
+        key = cast("tuple[str, str]", raw_key if isinstance(raw_key, tuple) else (raw_key,))
         trend = trends[key]
         trend_values = trend.predict(grp[date_col])
-        raw_ratio = grp[target_col].values / np.maximum(trend_values, 1.0)
+        raw_ratio = grp[target_col].to_numpy(dtype=float) / np.maximum(trend_values, 1.0)
         clipped = np.clip(raw_ratio, *RESIDUAL_CLIP_RANGE)
         ratios.loc[grp.index] = clipped
 
@@ -370,9 +385,8 @@ def predict_with_trend(
 
     result = np.zeros(len(df))
 
-    for key, grp in df.groupby(group_cols, observed=True):
-        if not isinstance(key, tuple):
-            key = (key,)
+    for raw_key, grp in df.groupby(group_cols, observed=True):
+        key = cast("tuple[str, str]", raw_key if isinstance(raw_key, tuple) else (raw_key,))
         trend = trends[key]
         trend_values = trend.predict(grp[date_col])
         idx = grp.index
@@ -487,7 +501,7 @@ def apply_conformal_calibration(
     cal_p90 = np.zeros(len(test_df))
 
     for ctype, pct_adj in adjustments.items():
-        mask = (test_df[type_col] == ctype).values
+        mask = (test_df[type_col] == ctype).to_numpy()
         # Symmetric adjustment around P50
         cal_p10[mask] = test_p10[mask] - pct_adj * test_p50[mask]
         cal_p90[mask] = test_p90[mask] + pct_adj * test_p50[mask]
@@ -519,10 +533,8 @@ class RecursiveFeatureBuilder:
             sorted(pd.Timestamp(d) for d in holidays["date"].dt.date.unique())
         )
         self.origin = usage["date"].min()
-        self._hist_lookup: dict[tuple, float] = (
-            usage.set_index(["date", "compute_type", "customer_segment"])["compute_hours"]
-            .to_dict()
-        )
+        hist_series = usage.set_index(["date", "compute_type", "customer_segment"])["compute_hours"]
+        self._hist_lookup: dict[tuple, float] = cast("dict[tuple, float]", hist_series.to_dict())
         self._pred_cache: dict[tuple, float] = {}
 
     def get_value(self, dt: pd.Timestamp, ct: str, seg: str) -> float:

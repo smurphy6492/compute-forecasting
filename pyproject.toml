@@ -31,23 +31,48 @@ production = [
     "mlflow>=3.0",
 ]
 dev = [
-    "ruff>=0.4",
+    "ruff>=0.15.10",
     "mypy>=1.10",
     "pytest>=8.0",
     "pytest-cov",
+    "pre-commit",
 ]
 
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+# Notebooks are exploratory showcase artifacts with their own conventions (top-level
+# prints, non-linear imports); mlruns is generated MLflow state. Neither is library
+# code, so both are out of scope for lint/format. force-exclude keeps them excluded
+# even when pre-commit passes file paths explicitly.
+extend-exclude = ["notebooks", "mlruns"]
+force-exclude = true
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "W", "UP"]
+# E/W pycodestyle, F pyflakes, I import order, UP pyupgrade, B bugbear, SIM simplify,
+# N pep8-naming, PTH use-pathlib, T20 no-print. This is the workspace canonical set.
+select = ["E", "F", "I", "UP", "B", "SIM", "N", "PTH", "T20", "W"]
+
+[tool.ruff.lint.per-file-ignores]
+# The synthetic-data generator and the analysis/build scripts communicate via print
+# and are not held to library import-placement, line-length, or pathlib hygiene.
+# Correctness rules (F, most B, SIM, I) still apply.
+"data/**" = ["T201"]
+"scripts/**" = ["T201", "E501", "E402", "PTH"]
+# Production entrypoints print progress and use ML matrix naming (X, y).
+"production/**" = ["T201", "PTH", "N803", "N806"]
 
 [tool.mypy]
 python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
+
+# pandas/numpy ship no (or only partial) stubs; the isolated pre-commit mypy hook
+# runs without them installed. Ignoring missing imports keeps the local hook and the
+# dependency-installed CI run consistent; our own code is still fully type-checked.
+[[tool.mypy.overrides]]
+module = ["pandas.*", "numpy.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

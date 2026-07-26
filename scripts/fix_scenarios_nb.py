@@ -1,4 +1,5 @@
 """Fix the scenario notebook forecast mechanics."""
+
 import json
 
 with open("notebooks/03_scenarios.ipynb", encoding="utf-8") as f:
@@ -21,18 +22,20 @@ def replace_cell(cell_id, new_source, cell_type=None):
 # ============================================================
 # Fix cell 4 (8619a59435e8) - Model Training explanation
 # ============================================================
-replace_cell("8619a59435e8",
+replace_cell(
+    "8619a59435e8",
     "## 2. Model Training\n"
     "\n"
     "We train the full LightGBM model (all 24 features) on ALL available data through Jun 30, 2026. For the forecast period, we use **recursive forecasting**: seed with the last known actuals, predict one day at a time, and feed predictions back as lag features for subsequent days.\n"
     "\n"
-    "This is how the model would operate in production -- each morning, yesterday's actual becomes available and feeds the next forecast."
+    "This is how the model would operate in production -- each morning, yesterday's actual becomes available and feeds the next forecast.",
 )
 
 # ============================================================
 # Fix cell 5 (2e0ce3a49de0) - Feature setup
 # ============================================================
-replace_cell("2e0ce3a49de0",
+replace_cell(
+    "2e0ce3a49de0",
     "# Build features on full dataset\n"
     "df = build_features(usage, holidays)\n"
     "feature_cols = get_feature_columns(df)\n"
@@ -47,13 +50,14 @@ replace_cell("2e0ce3a49de0",
     "}\n"
     "\n"
     "print(f'Features: {len(feature_cols)}')\n"
-    "print(f'Training rows: {len(df):,}')"
+    "print(f'Training rows: {len(df):,}')",
 )
 
 # ============================================================
 # Fix cell 6 (078e9ac77e49) - Train full models
 # ============================================================
-replace_cell("078e9ac77e49",
+replace_cell(
+    "078e9ac77e49",
     "# Train P10/P50/P90 on ALL data (full feature set)\n"
     "X_all = df[feature_cols]\n"
     "y_all = df[TARGET]\n"
@@ -65,22 +69,24 @@ replace_cell("078e9ac77e49",
     "    m = lgb.LGBMRegressor(**p)\n"
     "    m.fit(X_all, y_all, categorical_feature=CAT_FEATURES)\n"
     "    models[label] = m\n"
-    "    print(f'{label}: trained on {len(X_all):,} rows')"
+    "    print(f'{label}: trained on {len(X_all):,} rows')",
 )
 
 # ============================================================
 # Fix cell 7 (2b220bd34042) - Forecast intro
 # ============================================================
-replace_cell("2b220bd34042",
+replace_cell(
+    "2b220bd34042",
     "## 3. 60-Day Daily Forecast (Jul-Aug 2026)\n"
     "\n"
-    "We generate forecasts day-by-day using recursive prediction: each day's P50 forecast feeds back as lag features for subsequent days. Calendar, holiday, trend, and categorical features are computed directly from the date."
+    "We generate forecasts day-by-day using recursive prediction: each day's P50 forecast feeds back as lag features for subsequent days. Calendar, holiday, trend, and categorical features are computed directly from the date.",
 )
 
 # ============================================================
 # Fix cell 8 (09631497f97c) - Forecast scaffold
 # ============================================================
-replace_cell("09631497f97c",
+replace_cell(
+    "09631497f97c",
     "# Build forecast scaffold and historical lookup\n"
     "FORECAST_START = pd.Timestamp('2026-07-01')\n"
     "FORECAST_END = pd.Timestamp('2026-12-31')  # Full 6-month horizon\n"
@@ -101,22 +107,23 @@ replace_cell("09631497f97c",
     "origin = usage['date'].min()\n"
     "\n"
     "print(f'Forecast horizon: {FORECAST_START.date()} to {FORECAST_END.date()} ({len(forecast_dates)} days)')\n"
-    "print(f'Series: {len(COMPUTE_TYPES) * len(SEGMENTS)}')"
+    "print(f'Series: {len(COMPUTE_TYPES) * len(SEGMENTS)}')",
 )
 
 # ============================================================
 # Fix cell 9 (97ba3928c1f0) - Build features and forecast recursively
 # ============================================================
-replace_cell("97ba3928c1f0",
+replace_cell(
+    "97ba3928c1f0",
     "def get_value(dt, ct, seg):\n"
-    "    \"\"\"Get actual or predicted value for a (date, type, segment).\"\"\"\n"
+    '    """Get actual or predicted value for a (date, type, segment)."""\n'
     "    key = (dt, ct, seg)\n"
     "    if key in hist_lookup:\n"
     "        return hist_lookup[key]\n"
     "    return pred_cache.get(key, np.nan)\n"
     "\n"
     "def build_row_features(dt, ct, seg):\n"
-    "    \"\"\"Build feature dict for a single (date, type, segment).\"\"\"\n"
+    '    """Build feature dict for a single (date, type, segment)."""\n'
     "    ts = pd.Timestamp(dt) if not isinstance(dt, pd.Timestamp) else dt\n"
     "    d = ts.date() if hasattr(ts, 'date') else ts\n"
     "\n"
@@ -171,13 +178,14 @@ replace_cell("97ba3928c1f0",
     "        'days_since_start': (ts - origin).days,\n"
     "    }\n"
     "\n"
-    "print('Feature builder ready.')"
+    "print('Feature builder ready.')",
 )
 
 # ============================================================
 # Fix cell 10 (3d20b62ea0b7) - Generate forecasts recursively
 # ============================================================
-replace_cell("3d20b62ea0b7",
+replace_cell(
+    "3d20b62ea0b7",
     "# Recursive forecasting: predict day by day, feed P50 back as lags\n"
     "all_forecast_rows = []\n"
     "\n"
@@ -213,13 +221,14 @@ replace_cell("3d20b62ea0b7",
     "last_actual = usage[usage['date'] == usage['date'].max()].groupby('date')['compute_hours'].sum().iloc[0]\n"
     "first_forecast = fc[fc['date'] == FORECAST_START]['base_P50'].sum()\n"
     "print(f'Last actual day total: {last_actual:,.0f}')\n"
-    "print(f'First forecast day P50: {first_forecast:,.0f} ({first_forecast/last_actual:.0%} of last actual)')"
+    "print(f'First forecast day P50: {first_forecast:,.0f} ({first_forecast/last_actual:.0%} of last actual)')",
 )
 
 # ============================================================
 # Fix cell 11 (81f3cc434d1d) - 60-day fan chart
 # ============================================================
-replace_cell("81f3cc434d1d",
+replace_cell(
+    "81f3cc434d1d",
     "# 60-day fan chart -- total compute\n"
     "FORECAST_END_60 = pd.Timestamp('2026-08-29')\n"
     "fc_60 = fc[fc['date'] <= FORECAST_END_60].copy()\n"
@@ -252,13 +261,14 @@ replace_cell("81f3cc434d1d",
     "plt.xticks(rotation=30)\n"
     "plt.tight_layout()\n"
     "fig.savefig(FIG_DIR / '60day_forecast_fan_chart.png', bbox_inches='tight')\n"
-    "plt.show()"
+    "plt.show()",
 )
 
 # ============================================================
 # Fix cell 12 (e76738c32cc4) - 60-day by type
 # ============================================================
-replace_cell("e76738c32cc4",
+replace_cell(
+    "e76738c32cc4",
     "# 60-day by compute type\n"
     "fc_by_type = fc_60.groupby(['date', 'compute_type']).agg({\n"
     "    'base_P10': 'sum', 'base_P50': 'sum', 'base_P90': 'sum'\n"
@@ -278,32 +288,35 @@ replace_cell("e76738c32cc4",
     "\n"
     "fig.suptitle('60-Day Forecast by Compute Type (P50 + P10-P90)', fontsize=14, fontweight='bold', y=1.01)\n"
     "plt.tight_layout()\n"
-    "plt.show()"
+    "plt.show()",
 )
 
 # ============================================================
 # Fix cell 13 (78a622d1c652) - Long-horizon intro
 # ============================================================
-replace_cell("78a622d1c652",
+replace_cell(
+    "78a622d1c652",
     "## 4. Months 3-6 Planning Envelope (Sep-Dec 2026)\n"
     "\n"
-    "The recursive forecast already covers the full Jul-Dec 2026 horizon. For months 3-6, uncertainty grows as recursive predictions feed forward. We present monthly summary statistics as a planning envelope rather than daily precision."
+    "The recursive forecast already covers the full Jul-Dec 2026 horizon. For months 3-6, uncertainty grows as recursive predictions feed forward. We present monthly summary statistics as a planning envelope rather than daily precision.",
 )
 
 # ============================================================
 # Fix cell 14 (1deb2b5aa70c) - Long-horizon now uses existing forecast
 # ============================================================
-replace_cell("1deb2b5aa70c",
+replace_cell(
+    "1deb2b5aa70c",
     "# Months 3-6 are already in the recursive forecast\n"
     "lh = fc[fc['date'] >= '2026-09-01'].copy()\n"
-    "print(f'Long-horizon period: {lh[\"date\"].min().date()} to {lh[\"date\"].max().date()}')\n"
-    "print(f'Rows: {len(lh):,}')"
+    'print(f\'Long-horizon period: {lh["date"].min().date()} to {lh["date"].max().date()}\')\n'
+    "print(f'Rows: {len(lh):,}')",
 )
 
 # ============================================================
 # Fix cell 15 (efd776d5b12e) - Monthly envelope table
 # ============================================================
-replace_cell("efd776d5b12e",
+replace_cell(
+    "efd776d5b12e",
     "# Monthly planning envelope table\n"
     "lh_daily = lh.groupby('date').agg({'base_P10': 'sum', 'base_P50': 'sum', 'base_P90': 'sum'}).reset_index()\n"
     "lh_daily['month_name'] = lh_daily['date'].dt.strftime('%b %Y')\n"
@@ -319,13 +332,14 @@ replace_cell("efd776d5b12e",
     "\n"
     "print('Monthly Planning Envelope (Total Daily Compute Hours):')\n"
     "print()\n"
-    "print(envelope.to_string())"
+    "print(envelope.to_string())",
 )
 
 # ============================================================
 # Fix cell 17 (20ee9e3578ef) - Combine and build scenarios
 # ============================================================
-replace_cell("20ee9e3578ef",
+replace_cell(
+    "20ee9e3578ef",
     "# Scenarios are built on the full recursive forecast\n"
     "combined = fc[['date', 'compute_type', 'customer_segment', 'base_P10', 'base_P50', 'base_P90']].copy()\n"
     "\n"
@@ -361,13 +375,14 @@ replace_cell("20ee9e3578ef",
     "combined.loc[gpu_inf_mask, 'low_P50'] *= EFFICIENCY_FACTOR\n"
     "combined.loc[gpu_inf_mask, 'low_P90'] *= EFFICIENCY_FACTOR\n"
     "\n"
-    "print(f'Scenarios built: {combined[\"date\"].min().date()} to {combined[\"date\"].max().date()}')"
+    'print(f\'Scenarios built: {combined["date"].min().date()} to {combined["date"].max().date()}\')',
 )
 
 # ============================================================
 # Fix cell 20 (58d665b2fcfb) - Capacity ceiling
 # ============================================================
-replace_cell("58d665b2fcfb",
+replace_cell(
+    "58d665b2fcfb",
     "# Define capacity ceiling\n"
     "# Use a growth-forward estimate: recent average + headroom that makes the story interesting\n"
     "recent_avg = usage[usage['date'] >= '2026-06-01'].groupby('date')['compute_hours'].sum().mean()\n"
@@ -379,7 +394,7 @@ replace_cell("58d665b2fcfb",
     "\n"
     "print(f'Recent average daily compute (Jun 2026): {recent_avg:,.0f} hours')\n"
     "print(f'Recent peak daily compute: {recent_peak:,.0f} hours')\n"
-    "print(f'Capacity ceiling (avg + 25% buffer): {CAPACITY_CEILING:,.0f} hours')"
+    "print(f'Capacity ceiling (avg + 25% buffer): {CAPACITY_CEILING:,.0f} hours')",
 )
 
 with open("notebooks/03_scenarios.ipynb", "w", encoding="utf-8") as f:

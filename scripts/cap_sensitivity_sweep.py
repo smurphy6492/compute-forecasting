@@ -26,9 +26,6 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "production"))
 
-import compute_forecasting.features as feat  # noqa: E402
-from compute_forecasting.features import build_features, fit_series_trends  # noqa: E402
-
 # Reuse the exact production pipeline pieces.
 from train import (  # noqa: E402
     TARGET,
@@ -39,17 +36,25 @@ from train import (  # noqa: E402
     predict_quantiles,
 )
 
+import compute_forecasting.features as feat  # noqa: E402
+from compute_forecasting.features import build_features, fit_series_trends  # noqa: E402
+
 # Caps to test, in monthly-growth terms. 10.0 (1000%/mo) never binds = "no cap".
 CAPS = [0.04, 0.05, 0.06, 0.07, 10.0]
 BASELINE_CAP = 0.05  # the shipped value
 
 # True generating monthly rates (from data/generate_synthetic_data.py) for context.
 GROWTH_RATES_BY_TYPE = {
-    "GPU Training": 0.025, "GPU Inference": 0.040,
-    "CPU Batch": 0.010, "CPU Interactive": 0.015,
+    "GPU Training": 0.025,
+    "GPU Inference": 0.040,
+    "CPU Batch": 0.010,
+    "CPU Interactive": 0.015,
 }
 SEGMENT_MULT = {
-    "Enterprise": 0.85, "Mid-Market": 1.10, "Startup": 1.50, "Research/Academic": 0.30,
+    "Enterprise": 0.85,
+    "Mid-Market": 1.10,
+    "Startup": 1.50,
+    "Research/Academic": 0.30,
 }
 
 
@@ -99,7 +104,7 @@ def main() -> None:
     print("Series with fastest uncapped fits (monthly):")
     for k in sorted(uncapped, key=uncapped.get, reverse=True)[:4]:
         true_rate = GROWTH_RATES_BY_TYPE[k[0]] * SEGMENT_MULT[k[1]]
-        print(f"  {k[0]+' | '+k[1]:<34} fitted {uncapped[k]:5.2%}   true {true_rate:5.2%}")
+        print(f"  {k[0] + ' | ' + k[1]:<34} fitted {uncapped[k]:5.2%}   true {true_rate:5.2%}")
     print()
 
     overall_rows = []
@@ -135,15 +140,19 @@ def main() -> None:
         )
 
     # ---- Per-series MAPE for the series the cap touches ----
-    watch = [("GPU Inference", "Startup"), ("GPU Inference", "Mid-Market"),
-             ("GPU Inference", "Enterprise"), ("GPU Training", "Startup")]
+    watch = [
+        ("GPU Inference", "Startup"),
+        ("GPU Inference", "Mid-Market"),
+        ("GPU Inference", "Enterprise"),
+        ("GPU Training", "Startup"),
+    ]
     print("\n" + "=" * 64)
     print("PER-SERIES P50 TEST MAPE (series the cap can touch)")
     print("=" * 64)
     header = f"{'series':<30}" + "".join(f"{cap_label(c):>8}" for c in CAPS)
     print(header)
     for key in watch:
-        row = f"{key[0]+' | '+key[1]:<30}"
+        row = f"{key[0] + ' | ' + key[1]:<30}"
         for c in CAPS:
             row += f"{per_series_by_cap[c][key]:>7.1f}%"
         print(row)

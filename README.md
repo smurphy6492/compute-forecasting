@@ -44,7 +44,7 @@ On production data, where the true growth ceiling is unknown, the same sweep wou
 
 ### Pipeline
 
-```
+```text
 EDA (51 cells)              Forecasting (72 cells)         Scenario Planning
 --------------------        ----------------------         -----------------
 Trend decomposition         25-feature engineering         60-day daily forecast
@@ -104,7 +104,7 @@ In production, this model would need drift detection to trigger retraining:
 
 ## Project Structure
 
-```
+```text
 compute-forecasting/
 ├── notebooks/
 │   ├── 01_eda.ipynb                    # Exploratory analysis (51 cells)
