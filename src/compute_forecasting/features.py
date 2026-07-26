@@ -234,7 +234,12 @@ def get_feature_columns(df: pd.DataFrame, exclude: list[str] | None = None) -> l
 # Hybrid Trend + Residual Model Support
 # ---------------------------------------------------------------------------
 
-MAX_MONTHLY_GROWTH_RATE = 0.05  # Cap: 5% per month (~80% annualized)
+MAX_MONTHLY_GROWTH_RATE = 0.06  # Cap: 6% per month (~101% annualized)
+# Selected via cap sensitivity sweep (scripts/cap_sensitivity_sweep.py): chosen on
+# validation MAPE, reported on test. 6% is the tightest cap that clips no series'
+# genuine fitted growth (the fastest, GPU Inference | Startup, fits ~5.9%/mo), so it
+# retains the runaway-extrapolation guard rail at zero accuracy cost. The earlier 5%
+# value clipped that series and cost it ~7pp MAPE. See README "Growth cap sensitivity".
 RESIDUAL_CLIP_RANGE = (0.1, 10.0)  # Clip residual ratios to prevent extremes
 
 
