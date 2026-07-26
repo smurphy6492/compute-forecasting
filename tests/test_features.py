@@ -2,6 +2,7 @@
 
 Integration-style tests using actual project data for realistic validation.
 """
+
 from pathlib import Path
 
 import numpy as np
@@ -44,12 +45,14 @@ def holidays_data() -> pd.DataFrame:
 def sample_data() -> pd.DataFrame:
     """Minimal sample data for unit tests."""
     dates = pd.date_range("2023-01-01", periods=400, freq="D")
-    return pd.DataFrame({
-        "date": dates,
-        "compute_type": ["GPU Training"] * 400,
-        "customer_segment": ["Enterprise"] * 400,
-        "compute_hours": np.random.default_rng(42).uniform(1000, 5000, 400),
-    })
+    return pd.DataFrame(
+        {
+            "date": dates,
+            "compute_type": ["GPU Training"] * 400,
+            "customer_segment": ["Enterprise"] * 400,
+            "compute_hours": np.random.default_rng(42).uniform(1000, 5000, 400),
+        }
+    )
 
 
 def test_build_features_output_shape(usage_data, holidays_data):
@@ -68,8 +71,7 @@ def test_build_features_output_shape(usage_data, holidays_data):
     # Total: 4 + 9 + 3 + 5 + 4 + 1 + 1 = 27
     expected_cols = 27
     assert len(df.columns) == expected_cols, (
-        f"Expected {expected_cols} columns, got {len(df.columns)}. "
-        f"Columns: {sorted(df.columns)}"
+        f"Expected {expected_cols} columns, got {len(df.columns)}. Columns: {sorted(df.columns)}"
     )
 
     # Core columns must be present
@@ -97,8 +99,15 @@ def test_build_features_no_unexpected_nans(usage_data, holidays_data):
 
     # No unexpected NaNs in calendar features
     calendar_features = [
-        "day_of_week", "month", "day_of_month", "week_of_year",
-        "is_weekend", "quarter", "day_of_year", "day_of_quarter", "is_quarter_end",
+        "day_of_week",
+        "month",
+        "day_of_month",
+        "week_of_year",
+        "is_weekend",
+        "quarter",
+        "day_of_year",
+        "day_of_quarter",
+        "is_quarter_end",
     ]
     for feat in calendar_features:
         assert df[feat].notna().all(), f"Calendar feature {feat} should have no NaNs"
@@ -106,21 +115,25 @@ def test_build_features_no_unexpected_nans(usage_data, holidays_data):
 
 def test_add_calendar_features_day_of_week():
     """Verify day_of_week is correct for known dates."""
-    df = pd.DataFrame({
-        "date": pd.to_datetime([
-            "2023-01-02",  # Monday
-            "2023-01-07",  # Saturday
-            "2023-01-08",  # Sunday
-        ]),
-    })
+    df = pd.DataFrame(
+        {
+            "date": pd.to_datetime(
+                [
+                    "2023-01-02",  # Monday
+                    "2023-01-07",  # Saturday
+                    "2023-01-08",  # Sunday
+                ]
+            ),
+        }
+    )
     result = add_calendar_features(df)
 
-    assert result["day_of_week"].tolist() == [0, 5, 6], (
-        "day_of_week should be 0=Mon, 5=Sat, 6=Sun"
-    )
-    assert result["is_weekend"].tolist() == [0, 1, 1], (
-        "is_weekend should be 1 for Sat/Sun, 0 otherwise"
-    )
+    assert result["day_of_week"].tolist() == [0, 5, 6], "day_of_week should be 0=Mon, 5=Sat, 6=Sun"
+    assert result["is_weekend"].tolist() == [
+        0,
+        1,
+        1,
+    ], "is_weekend should be 1 for Sat/Sun, 0 otherwise"
 
 
 def test_add_lag_features_correctness(sample_data):
@@ -150,9 +163,7 @@ def test_fit_series_trends_returns_one_per_series(usage_data):
 
     # Count unique series in data
     n_series = usage_data.groupby(["compute_type", "customer_segment"]).ngroups
-    assert len(trends) == n_series, (
-        f"Expected {n_series} trends, got {len(trends)}"
-    )
+    assert len(trends) == n_series, f"Expected {n_series} trends, got {len(trends)}"
 
     # Check structure
     for key, trend in trends.items():
@@ -173,9 +184,7 @@ def test_compute_residual_ratios_centered_around_one(sample_data):
 
     # Mean should be close to 1.0 (since trend is fit to this data)
     mean_ratio = ratios.mean()
-    assert 0.8 <= mean_ratio <= 1.2, (
-        f"Mean residual ratio should be ~1.0, got {mean_ratio:.3f}"
-    )
+    assert 0.8 <= mean_ratio <= 1.2, f"Mean residual ratio should be ~1.0, got {mean_ratio:.3f}"
 
 
 def test_predict_with_trend_round_trip(sample_data):
@@ -198,8 +207,10 @@ def test_predict_with_trend_round_trip(sample_data):
         expected = trend.predict(grp["date"])
         actual = predictions[grp.index]
         np.testing.assert_allclose(
-            actual, expected, rtol=1e-10,
-            err_msg="predict_with_trend should equal trend when log-residual is 0"
+            actual,
+            expected,
+            rtol=1e-10,
+            err_msg="predict_with_trend should equal trend when log-residual is 0",
         )
 
 
@@ -251,9 +262,11 @@ def conformal_data():
     """Create synthetic validation data for conformal calibration tests."""
     rng = np.random.default_rng(42)
     n = 200
-    df = pd.DataFrame({
-        "compute_type": (["GPU Training"] * 100) + (["CPU Batch"] * 100),
-    })
+    df = pd.DataFrame(
+        {
+            "compute_type": (["GPU Training"] * 100) + (["CPU Batch"] * 100),
+        }
+    )
     y_val = rng.uniform(500, 5000, n)
     # P50 close to actuals, P10/P90 as symmetric bands
     p50 = y_val + rng.normal(0, 100, n)
@@ -294,8 +307,7 @@ def test_calibrated_intervals_change_symmetrically(conformal_data):
         p10_shift = p10[mask] - cal_p10[mask]  # positive = P10 moved down (wider)
         p90_shift = cal_p90[mask] - p90[mask]  # positive = P90 moved up (wider)
         np.testing.assert_allclose(
-            p10_shift, p90_shift, rtol=1e-10,
-            err_msg=f"Adjustments for {ctype} should be symmetric"
+            p10_shift, p90_shift, rtol=1e-10, err_msg=f"Adjustments for {ctype} should be symmetric"
         )
 
 
@@ -313,9 +325,7 @@ def test_conformal_coverage_meets_target():
     p90 = p50 + 500
 
     target = 0.80
-    adjustments = compute_conformal_adjustments(
-        df, p10, p50, p90, y_val, target_coverage=target
-    )
+    adjustments = compute_conformal_adjustments(df, p10, p50, p90, y_val, target_coverage=target)
     cal_p10, cal_p90 = apply_conformal_calibration(df, p10, p50, p90, adjustments)
 
     # Check coverage on the same validation set (should be >= target)
@@ -357,9 +367,7 @@ def test_recursive_builder_feature_alignment(usage_data, holidays_data):
     # Compare to build_features output for the same row
     df = build_features(usage_data, holidays_data)
     batch_row = df[
-        (df["date"] == test_date) &
-        (df["compute_type"] == ct) &
-        (df["customer_segment"] == seg)
+        (df["date"] == test_date) & (df["compute_type"] == ct) & (df["customer_segment"] == seg)
     ].iloc[0]
 
     # Check all FEATURE_COLUMNS match

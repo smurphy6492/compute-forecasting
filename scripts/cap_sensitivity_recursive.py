@@ -53,10 +53,19 @@ TEST_START = pd.Timestamp("2026-01-01")
 TEST_END = pd.Timestamp("2026-06-30")
 
 PARAMS = {
-    "objective": "quantile", "alpha": 0.5, "metric": "quantile",
-    "learning_rate": 0.05, "num_leaves": 63, "min_child_samples": 50,
-    "subsample": 0.8, "colsample_bytree": 0.8, "reg_alpha": 0.1,
-    "reg_lambda": 1.0, "n_estimators": 2000, "random_state": 42, "verbose": -1,
+    "objective": "quantile",
+    "alpha": 0.5,
+    "metric": "quantile",
+    "learning_rate": 0.05,
+    "num_leaves": 63,
+    "min_child_samples": 50,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "reg_alpha": 0.1,
+    "reg_lambda": 1.0,
+    "n_estimators": 2000,
+    "random_state": 42,
+    "verbose": -1,
 }
 
 
@@ -70,8 +79,9 @@ def series_mape(y_true, y_pred, keys, target_key) -> float:
     return mean_absolute_percentage_error(y_true[mask], y_pred[mask]) * 100
 
 
-def run_one_cap(cap, df, feature_cols, train, val, test, usage, holidays,
-                test_dates, actuals, types, segments):
+def run_one_cap(
+    cap, df, feature_cols, train, val, test, usage, holidays, test_dates, actuals, types, segments
+):
     """Fit at `cap`, return (single_step_p50, recursive_df) plus MAPEs."""
     feat.MAX_MONTHLY_GROWTH_RATE = cap
     trends = fit_series_trends(train)
@@ -80,10 +90,13 @@ def run_one_cap(cap, df, feature_cols, train, val, test, usage, holidays,
     y_val = np.log(compute_residual_ratios(val, trends))
     model = lgb.LGBMRegressor(**PARAMS)
     model.fit(
-        train[feature_cols], y_train,
+        train[feature_cols],
+        y_train,
         eval_set=[(val[feature_cols], y_val)],
-        callbacks=[lgb.early_stopping(stopping_rounds=50, verbose=False),
-                   lgb.log_evaluation(period=0)],
+        callbacks=[
+            lgb.early_stopping(stopping_rounds=50, verbose=False),
+            lgb.log_evaluation(period=0),
+        ],
         categorical_feature=CAT_FEATURES,
     )
 
@@ -94,16 +107,18 @@ def run_one_cap(cap, df, feature_cols, train, val, test, usage, holidays,
     builder = RecursiveFeatureBuilder(usage[usage["date"] <= VAL_END], holidays)
     rows = []
     for dt in test_dates:
-        day = pd.DataFrame([builder.build_row(dt, ct, seg)
-                            for ct in types for seg in segments])
+        day = pd.DataFrame([builder.build_row(dt, ct, seg) for ct in types for seg in segments])
         day["compute_type"] = day["compute_type"].astype("category")
         day["customer_segment"] = day["customer_segment"].astype("category")
-        day["series_id"] = (day["compute_type"].astype(str) + " | "
-                            + day["customer_segment"].astype(str)).astype("category")
-        trend_vals = np.array([
-            trends[(r["compute_type"], r["customer_segment"])].predict(pd.Series([dt]))[0]
-            for _, r in day.iterrows()
-        ])
+        day["series_id"] = (
+            day["compute_type"].astype(str) + " | " + day["customer_segment"].astype(str)
+        ).astype("category")
+        trend_vals = np.array(
+            [
+                trends[(r["compute_type"], r["customer_segment"])].predict(pd.Series([dt]))[0]
+                for _, r in day.iterrows()
+            ]
+        )
         day["rec"] = np.maximum(trend_vals * np.exp(model.predict(day[feature_cols])), 0)
         for _, r in day.iterrows():
             builder.cache_prediction(dt, r["compute_type"], r["customer_segment"], r["rec"])
@@ -111,7 +126,8 @@ def run_one_cap(cap, df, feature_cols, train, val, test, usage, holidays,
         rows.append(day[["date", "compute_type", "customer_segment", "rec"]])
 
     rc = pd.concat(rows, ignore_index=True).merge(
-        actuals, on=["date", "compute_type", "customer_segment"], how="left")
+        actuals, on=["date", "compute_type", "customer_segment"], how="left"
+    )
     return ss_p50, rc
 
 
@@ -130,18 +146,33 @@ def main() -> None:
     segments = sorted(usage["customer_segment"].unique())
     test_dates = pd.date_range(TEST_START, TEST_END, freq="D")
     actuals = usage[usage["date"] >= TEST_START][
-        ["date", "compute_type", "customer_segment", "compute_hours"]]
+        ["date", "compute_type", "customer_segment", "compute_hours"]
+    ]
 
-    test_keys = list(zip(test["compute_type"], test["customer_segment"]))
+    test_keys = list(zip(test["compute_type"], test["customer_segment"], strict=True))
     y_test = test[TARGET].to_numpy()
 
     results = {}
     for cap in CAPS:
-        print(f"  cap={cap_label(cap):>5}: fitting + recursive forecast "
-              f"({len(test_dates)} days x {len(types)*len(segments)} series)...")
-        ss_p50, rc = run_one_cap(cap, df, feature_cols, train, val, test,
-                                 usage, holidays, test_dates, actuals, types, segments)
-        rc_keys = list(zip(rc["compute_type"], rc["customer_segment"]))
+        print(
+            f"  cap={cap_label(cap):>5}: fitting + recursive forecast "
+            f"({len(test_dates)} days x {len(types) * len(segments)} series)..."
+        )
+        ss_p50, rc = run_one_cap(
+            cap,
+            df,
+            feature_cols,
+            train,
+            val,
+            test,
+            usage,
+            holidays,
+            test_dates,
+            actuals,
+            types,
+            segments,
+        )
+        rc_keys = list(zip(rc["compute_type"], rc["customer_segment"], strict=True))
         rc_true = rc["compute_hours"].to_numpy()
         rc_pred = rc["rec"].to_numpy()
         results[cap] = {
@@ -157,26 +188,34 @@ def main() -> None:
     print("\n" + "=" * 72)
     print("SINGLE-STEP vs RECURSIVE, BY CAP")
     print("=" * 72)
-    print(f"{'cap':>6} | {'SS overall':>10} {'REC overall':>11} {'degrade':>8} "
-          f"| {'SS Startup':>10} {'REC Startup':>11} {'degrade':>8}")
+    print(
+        f"{'cap':>6} | {'SS overall':>10} {'REC overall':>11} {'degrade':>8} "
+        f"| {'SS Startup':>10} {'REC Startup':>11} {'degrade':>8}"
+    )
     print("-" * 72)
     for cap in CAPS:
         r = results[cap]
         tag = {"5%": "  <- original", "6%": "  <- shipped"}.get(cap_label(cap), "")
-        print(f"{cap_label(cap):>6} | {r['ss_overall']:>9.2f}% {r['rc_overall']:>10.2f}% "
-              f"{r['rc_overall']-r['ss_overall']:>+7.2f} | "
-              f"{r['ss_watch']:>9.1f}% {r['rc_watch']:>10.1f}% "
-              f"{r['rc_watch']-r['ss_watch']:>+7.1f}{tag}")
+        print(
+            f"{cap_label(cap):>6} | {r['ss_overall']:>9.2f}% {r['rc_overall']:>10.2f}% "
+            f"{r['rc_overall'] - r['ss_overall']:>+7.2f} | "
+            f"{r['ss_watch']:>9.1f}% {r['rc_watch']:>10.1f}% "
+            f"{r['rc_watch'] - r['ss_watch']:>+7.1f}{tag}"
+        )
 
     # ---- The headline question: does the cap penalty compound recursively? ----
     b, s = results[BASELINE_CAP], results[SHIPPED_CAP]
     print("\n" + "=" * 72)
     print(f"CAP PENALTY (5% -> 6%) FOR {WATCH[0]} | {WATCH[1]}")
     print("=" * 72)
-    print(f"  Single-step: {b['ss_watch']:.1f}%  ->  {s['ss_watch']:.1f}%   "
-          f"(cap cost {b['ss_watch']-s['ss_watch']:+.1f}pp)")
-    print(f"  Recursive:   {b['rc_watch']:.1f}%  ->  {s['rc_watch']:.1f}%   "
-          f"(cap cost {b['rc_watch']-s['rc_watch']:+.1f}pp)")
+    print(
+        f"  Single-step: {b['ss_watch']:.1f}%  ->  {s['ss_watch']:.1f}%   "
+        f"(cap cost {b['ss_watch'] - s['ss_watch']:+.1f}pp)"
+    )
+    print(
+        f"  Recursive:   {b['rc_watch']:.1f}%  ->  {s['rc_watch']:.1f}%   "
+        f"(cap cost {b['rc_watch'] - s['rc_watch']:+.1f}pp)"
+    )
     ss_cost = b["ss_watch"] - s["ss_watch"]
     rc_cost = b["rc_watch"] - s["rc_watch"]
     if rc_cost > ss_cost + 0.5:
@@ -186,8 +225,10 @@ def main() -> None:
     else:
         verdict = "SIMILAR: the cap penalty is about the same in both regimes."
     print(f"\n  Verdict: {verdict}")
-    print(f"  Overall recursive: 5% {b['rc_overall']:.2f}% -> 6% {s['rc_overall']:.2f}% "
-          f"({s['rc_overall']-b['rc_overall']:+.2f}pp)")
+    print(
+        f"  Overall recursive: 5% {b['rc_overall']:.2f}% -> 6% {s['rc_overall']:.2f}% "
+        f"({s['rc_overall'] - b['rc_overall']:+.2f}pp)"
+    )
 
 
 if __name__ == "__main__":

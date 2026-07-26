@@ -1,0 +1,38 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+  # Keep this rev's minor version (0.15.x) in sync with the ruff installed by
+  # `pip install -e ".[dev]"`, so the pre-commit hook and `make check` agree on
+  # import sorting and formatting. A stale pin (e.g. 0.4.x) sorts imports
+  # differently and the two gate layers fight each other.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.22
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.10.0
+    hooks:
+      - id: mypy
+        files: ^src/
+        additional_dependencies: []
+  - repo: https://github.com/DavidAnson/markdownlint-cli2
+    rev: v0.13.0
+    hooks:
+      - id: markdownlint-cli2
+  - repo: local
+    hooks:
+      - id: no-smart-quotes
+        name: no smart quotes (use straight quotes in md/txt)
+        language: pygrep
+        # pygrep compiles this pattern as bytes and scans file bytes, so a
+        # character class [‘’“”] collapses to a class of individual bytes —
+        # including 0xe2, the lead byte of every em dash and box-drawing char,
+        # producing false positives. Alternation matches each curly quote's
+        # full 3-byte UTF-8 sequence instead.
+        entry: "‘|’|“|”"
+        files: '\.(md|txt)$'
